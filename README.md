@@ -16,10 +16,10 @@ El token contiene:
 Para probar las APIs desde tu computadora local:
 
 # Crear túnel SSH para el puerto 80  en donde corre el API Gateway
-ssh -L 8080:localhost:80 ubuntu@10.20.12.97 -p 5801
+ssh -NL 8080:localhost:80 ubuntu@10.20.12.97 -p 5801
 
 # Crear túnel SSH para el Dashboard de Traefik (opcional)
-ssh -L 8081:localhost:8080 ubuntu@10.20.12.97 -p 5801
+ssh -NL 8081:localhost:8080 ubuntu@10.20.12.97 -p 5801
 
 ### Una vez establecido el túnel, puedes usar:
 

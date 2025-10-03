@@ -1,0 +1,70 @@
+services:
+  # ========== API GATEWAY ==========
+  api_gateway:
+    image: traefik:v3.0
+    container_name: api_gateway_service
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--log.level=INFO"
+    ports:
+      - "80:80"
+      - "8080:8080"  # Dashboard de Traefik
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - red_cloud
+    restart: unless-stopped
+
+  # ========== CONTENEDORES APIS ==========
+  # API de Autenticación y Autorización
+  auth_api:
+    build:
+      context: ./auth_api
+      dockerfile: Dockerfile
+    container_name: auth_service
+    environment:
+      - DB_HOST=mysql_db
+      - DB_PORT=3306
+      - DB_NAME=usuarios_de_red
+      - DB_USER=app_user
+      - DB_PASSWORD=app_password123
+      - JWT_SECRET_KEY=mi_clave_secreta_super_segura_12345
+    depends_on:
+      - mysql_db
+    networks:
+      - red_cloud
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.auth-api.rule=PathPrefix(`/auth`)"
+      - "traefik.http.routers.auth-api.entrypoints=web"
+      - "traefik.http.services.auth-api.loadbalancer.server.port=8000"
+      - "traefik.http.middlewares.auth-strip.stripprefix.prefixes=/auth"
+      - "traefik.http.routers.auth-api.middlewares=auth-strip"
+    restart: unless-stopped
+
+  # ========== CONTENEDORES BASE DE DATOS ==========
+  # Base de datos MySQL
+  mysql_db:
+    image: mysql:8.0
+    container_name: usuarios_de_red_db
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword123
+      MYSQL_DATABASE: usuarios_de_red
+      MYSQL_USER: app_user
+      MYSQL_PASSWORD: app_password123
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - red_cloud
+    restart: unless-stopped
+
+networks:
+  red_cloud:
+    driver: bridge
+
+volumes:
+  mysql_data:

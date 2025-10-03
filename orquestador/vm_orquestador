@@ -1,0 +1,43 @@
+#!/bin/bash
+
+# parametros
+SLICE_NAME="$1"
+VLAN_ID="$2"
+DHCP_WORKER="$3"
+WORKERS=("10.0.10.2" "10.0.10.3" "10.0.10.4")
+
+# iniciamos el ofs
+ssh ubuntu@"10.0.10.5" "cd scripts_orquestacion && ./init_ofs.sh"
+
+WORKER_NUM=1 #para iterar
+# desplegar vm en cada worker
+for WORKER_IP in "${WORKERS[@]}"; do
+
+  VM_NAME="ID$VLAN_ID-VM$WORKER_NUM"
+
+  # calcular el puerto vnc de la vm
+  VNC_PORT=$(ssh ubuntu@"$WORKER_IP" "ps aux | grep qemu | grep -v grep | wc -l")
+  VNC_PORT=$((VNC_PORT + 1))
+
+  # info de vm a desplegar
+  echo "-- Desplegando la VM $VM_NAME en el worker $WORKER_NUM (IP: $WORKER_IP) con VNC_PORT: $VNC_PORT --"
+
+  # iniciar worker
+  echo "-- Ejecutando init_worker.sh en el worker $WORKER_NUM... --"
+  ssh ubuntu@"$WORKER_IP" "cd scripts_orquestacion && ./init_worker.sh br-int ens4"
+
+  # crear el namespace dhcp en un worker
+  if [ "$WORKER_NUM" -eq "$DHCP_WORKER" ]; then
+    echo "-- Creando el namespace DHCP para VLAN $VLAN_ID en el worker $WORKER_NUM..."
+    ssh ubuntu@"$WORKER_IP" "cd scripts_orquestacion && ./ns_dhcp_create.sh $VLAN_ID br-int"
+  fi
+
+  # crear vm
+  ssh ubuntu@"$WORKER_IP" "cd scripts_orquestacion && ./vm_create.sh $VM_NAME br-int $VLAN_ID $VNC_PORT"
+
+  # pasar al siguiente worker
+  WORKER_NUM=$((WORKER_NUM + 1))
+
+done
+
+echo "-- Orquestacion completada --"

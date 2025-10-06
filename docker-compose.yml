@@ -8,15 +8,28 @@ services:
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
+      - "--certificatesresolvers.myresolver.acme.email=andres.lujanf@pucp.edu.pe"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.myresolver.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory"
       - "--log.level=INFO"
+      - "--global.sendanonymoususage=false"
     ports:
       - "80:80"
+      - "443:443"
       - "8080:8080"  # Dashboard de Traefik
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_letsencrypt:/letsencrypt
     networks:
       - red_cloud
     restart: unless-stopped
+    labels:
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+      - "traefik.http.routers.redirs.rule=hostregexp(`{host:.+}`)"
+      - "traefik.http.routers.redirs.entrypoints=web"
+      - "traefik.http.routers.redirs.middlewares=redirect-to-https"
 
   # ========== CONTENEDORES APIS ==========
   # API de Autenticación y Autorización
@@ -39,107 +52,105 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.auth-api.rule=PathPrefix(`/auth`)"
-      - "traefik.http.routers.auth-api.entrypoints=web"
+      - "traefik.http.routers.auth-api.entrypoints=websecure"
+      - "traefik.http.routers.auth-api.tls.certresolver=myresolver"
       - "traefik.http.services.auth-api.loadbalancer.server.port=8000"
       - "traefik.http.middlewares.auth-strip.stripprefix.prefixes=/auth"
       - "traefik.http.routers.auth-api.middlewares=auth-strip"
     restart: unless-stopped
 
-  # ========== SERVICIOS DE MONITOREO ==========
+  # ========== SERVICIOS DE MONITOREO ========== (COMENTADO)
   # Prometheus - Recolección de métricas
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: prometheus_service
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--storage.tsdb.retention.time=7d'
-      - '--storage.tsdb.retention.size=1GB'
-      - '--web.enable-lifecycle'
-      - '--web.enable-admin-api'
-    networks:
-      - red_cloud
-    restart: unless-stopped
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.prometheus.rule=PathPrefix(`/prometheus`)"
-      - "traefik.http.routers.prometheus.entrypoints=web"
-      - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
-      - "traefik.http.middlewares.prometheus-strip.stripprefix.prefixes=/prometheus"
-      - "traefik.http.routers.prometheus.middlewares=prometheus-strip"
+  # prometheus:
+  #   image: prom/prometheus:latest
+  #   container_name: prometheus_service
+  #   volumes:
+  #     - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+  #     - prometheus_data:/prometheus
+  #   command:
+  #     - '--config.file=/etc/prometheus/prometheus.yml'
+  #     - '--storage.tsdb.path=/prometheus'
+  #     - '--web.console.libraries=/etc/prometheus/console_libraries'
+  #     - '--web.console.templates=/etc/prometheus/consoles'
+  #     - '--storage.tsdb.retention.time=7d'
+  #     - '--storage.tsdb.retention.size=1GB'
+  #     - '--web.enable-lifecycle'
+  #     - '--web.enable-admin-api'
+  #     - '--web.external-url=http://localhost/prometheus/'
+  #     - '--web.route-prefix=/prometheus/'
+  #   networks:
+  #     - red_cloud
+  #   restart: unless-stopped
+  #   labels:
+  #     - "traefik.enable=true"
+  #     - "traefik.http.routers.prometheus.rule=PathPrefix(`/prometheus`)"
+  #     - "traefik.http.routers.prometheus.entrypoints=websecure"
+  #     - "traefik.http.routers.prometheus.tls.certresolver=myresolver"
+  #     - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
 
   # Grafana - Visualización de métricas
-  grafana:
-    image: grafana/grafana:latest
-    container_name: grafana_service
-    ports:
-      - "3000:3000"
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
-      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
-      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
-    environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin123
-      - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s:%(http_port)s/grafana/
-      - GF_SERVER_SERVE_FROM_SUB_PATH=true
-    networks:
-      - red_cloud
-    restart: unless-stopped
-    depends_on:
-      - prometheus
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.grafana.rule=PathPrefix(`/grafana`)"
-      - "traefik.http.routers.grafana.entrypoints=web"
-      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+  # grafana:
+  #   image: grafana/grafana:latest
+  #   container_name: grafana_service
+  #   volumes:
+  #     - grafana_data:/var/lib/grafana
+  #     - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+  #     - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+  #   environment:
+  #     - GF_SECURITY_ADMIN_USER=admin
+  #     - GF_SECURITY_ADMIN_PASSWORD=admin123
+  #     - GF_USERS_ALLOW_SIGN_UP=false
+  #     - GF_SERVER_ROOT_URL=https://localhost/grafana/
+  #     - GF_SERVER_SERVE_FROM_SUB_PATH=true
+  #   networks:
+  #     - red_cloud
+  #   restart: unless-stopped
+  #   depends_on:
+  #     - prometheus
+  #   labels:
+  #     - "traefik.enable=true"
+  #     - "traefik.http.routers.grafana.rule=PathPrefix(`/grafana`)"
+  #     - "traefik.http.routers.grafana.entrypoints=websecure"
+  #     - "traefik.http.routers.grafana.tls.certresolver=myresolver"
+  #     - "traefik.http.services.grafana.loadbalancer.server.port=3000"
 
-  # Node Exporter - Métricas del head node
-  node-exporter:
-    image: prom/node-exporter:latest
-    container_name: node_exporter_service
-    ports:
-      - "9100:9100"
-    volumes:
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      - /:/rootfs:ro
-    command:
-      - '--path.procfs=/host/proc'
-      - '--path.rootfs=/rootfs'
-      - '--path.sysfs=/host/sys'
-      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
-    networks:
-      - red_cloud
-    restart: unless-stopped
+  # Node Exporter - Métricas del head node (COMENTADO)
+  # node-exporter:
+  #   image: prom/node-exporter:latest
+  #   container_name: node_exporter_service
+  #   ports:
+  #     - "9100:9100"
+  #   volumes:
+  #     - /proc:/host/proc:ro
+  #     - /sys:/host/sys:ro
+  #     - /:/rootfs:ro
+  #   command:
+  #     - '--path.procfs=/host/proc'
+  #     - '--path.rootfs=/rootfs'
+  #     - '--path.sysfs=/host/sys'
+  #     - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+  #   networks:
+  #     - red_cloud
+  #   restart: unless-stopped
 
-  # cAdvisor - Métricas de la red de contenedores
-  cadvisor:
-    image: gcr.io/cadvisor/cadvisor:latest
-    container_name: cadvisor_service
-    ports:
-      - "8081:8080"
-    volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:ro
-      - /sys:/sys:ro
-      - /var/lib/docker/:/var/lib/docker:ro
-      - /dev/disk/:/dev/disk:ro
-    privileged: true
-    devices:
-      - /dev/kmsg
-    networks:
-      - red_cloud
-    restart: unless-stopped
+  # cAdvisor - Métricas de la red de contenedores (COMENTADO)
+  # cadvisor:
+  #   image: gcr.io/cadvisor/cadvisor:latest
+  #   container_name: cadvisor_service
+  #   ports:
+  #     - "8081:8080"
+  #   volumes:
+  #     - /:/rootfs:ro
+  #     - /var/run:/var/run:ro
+  #     - /sys:/sys:ro
+  #     - /var/lib/docker/:/var/lib/docker:ro
+  #     - /dev/disk/:/dev/disk:ro
+  #   privileged: true
+  #   devices:
+  #     - /dev/kmsg
+  #   networks:
+  #     - red_cloud
+  #   restart: unless-stopped
 
   # ========== CONTENEDORES BASE DE DATOS ==========
   # Base de datos MySQL
@@ -164,5 +175,6 @@ networks:
 
 volumes:
   mysql_data:
-  prometheus_data:
-  grafana_data:
+  # prometheus_data:  # Comentado - no se usa
+  # grafana_data:     # Comentado - no se usa
+  traefik_letsencrypt:

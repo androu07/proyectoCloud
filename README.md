@@ -82,7 +82,7 @@ https://localhost:8443/prometheus     }'
 
 # Acceder desde navegador## Túnel SSH para Acceso Remoto
 
-https://localhost:8443/grafanaPara acceder a los servicios desde tu computadora:
+https://localhost:8443/grafana Para acceder a los servicios desde tu computadora:
 
 
 # API para crear dashboard
@@ -295,7 +295,7 @@ La API está optimizada para manejar múltiples solicitudes concurrentes:
 ## Base de Datos
 
 ### Tabla usuarios
-sql
+```sql
 CREATE TABLE usuarios (
     id INT AUTO_INCREMENT PRIMARY KEY,
     nombre VARCHAR(100) NOT NULL,
@@ -306,3 +306,163 @@ CREATE TABLE usuarios (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
+```
+
+---
+
+# 📊 Sistema de Logging y Monitoreo
+
+## Arquitectura de Logging
+
+### Componentes del Sistema
+- **Traefik**: Genera logs de acceso en formato JSON
+- **Loki**: Almacena y indexa los logs de forma eficiente
+- **Promtail**: Recolecta y procesa logs de Traefik y contenedores
+- **Grafana**: Visualiza logs con dashboards y consultas
+
+## 🔍 Información de Auditoría y Trazabilidad
+
+### Datos que Proporcionan los Logs
+- **¿Quién?** → IP del cliente + User Agent
+- **¿Cuándo?** → Timestamp exacto de cada request
+- **¿Qué hizo?** → Endpoint accedido (`/auth/login`, `/auth/verify`)
+- **¿Cómo terminó?** → Status code (éxito/fallo)
+- **¿Cuánto tardó?** → Duración del request
+
+### Métricas de Tráfico Disponibles
+- **Requests por segundo/minuto/hora**
+- **Volumen total de requests por día**
+- **Picos de tráfico y patrones de uso**
+- **APIs más utilizadas**
+- **Servicios backend más accedidos**
+
+### Análisis de Códigos de Estado
+- **Distribución de status codes** (200, 404, 500, etc.)
+- **Tasa de errores por servicio**
+- **Errores 4xx vs 5xx**
+- **Porcentaje de requests exitosos**
+
+### Información de Clientes
+- **Top IPs más activas**
+- **User Agents más comunes**
+- **Detección de bots/crawlers**
+- **Patrones de uso por ubicación**
+
+## 🚨 Detección de Actividades Sospechosas
+
+### Casos de Uso Forenses
+- **Brute force attacks** → Múltiples `/auth/login` fallidos desde la misma IP
+- **Acceso no autorizado** → Requests sin token JWT válido
+- **Escalación de privilegios** → Usuario intentando acceder APIs restringidas
+- **Ataques de enumeración** → Muchos 404s seguidos (buscando endpoints)
+- **Rate limiting abuse** → Demasiados requests por minuto
+
+### Ejemplo de Log de Traefik
+```json
+{
+  "time": "2025-10-07T14:30:45Z",
+  "ClientAddr": "192.168.1.100:54321",
+  "RequestMethod": "POST",
+  "RequestPath": "/auth/login",
+  "DownstreamStatus": 401,
+  "Duration": 250000000,
+  "request_User-Agent": "Mozilla/5.0...",
+  "ServiceName": "auth-api"
+}
+```
+
+## 🔍 Consultas de Investigación en Loki
+
+### Consultas Básicas de Seguridad
+```logql
+# Usuario específico por IP
+{job="traefik-access"} |= "192.168.1.100"
+
+# Fallos de login (intentos de brute force)
+{job="traefik-access"} | json | status="401" | path="/auth/login"
+
+# Actividad sospechosa (muchos errores 4xx)
+{job="traefik-access"} | json | status=~"4.." | count > 10
+
+# Timeline de actividad de un usuario
+{job="traefik-access"} |= "IP_SOSPECHOSA" | json | line_format "{{.time}} {{.method}} {{.path}} {{.status}}"
+
+# Errores de servidor (5xx)
+{job="traefik-access"} | json | status=~"5.."
+
+# Requests más lentos
+{job="traefik-access"} | json | Duration > 1000000000
+```
+
+### Consultas de Análisis de Tráfico
+```logql
+# Top endpoints más utilizados
+topk(10, sum by (path) (count_over_time({job="traefik-access"} | json [1h])))
+
+# Métodos HTTP más comunes
+sum by (method) (count_over_time({job="traefik-access"} | json [1h]))
+
+# IPs más activas
+topk(10, sum by (client_ip) (count_over_time({job="traefik-access"} | json [1h])))
+```
+
+## ⚡ Alertas Automáticas Recomendadas
+
+### Alertas de Seguridad
+- **Brute Force**: Más de 5 fallos de login en 1 minuto desde misma IP
+- **Acceso no autorizado**: Múltiples 401/403 en corto tiempo
+- **Reconocimiento**: IP nueva con muchos 404s consecutivos
+- **DDoS**: Más de 1000 requests por minuto desde misma IP
+
+### Alertas de Sistema
+- **Error de servidor**: Status 500 en APIs críticas
+- **Alta latencia**: Response time > 5 segundos
+- **Tasa de error**: > 5% de requests con errores
+- **Caída de servicio**: Sin requests en 5 minutos
+
+## 📊 Acceso a Logs en Grafana
+
+### URLs de Acceso
+- **Grafana**: `https://localhost:8443/grafana/`
+- **Explore Logs**: Menu → Explore → Seleccionar Loki datasource
+- **Dashboard**: "Traefik - Logs y Accesos" (creado automáticamente)
+
+### Credenciales
+- **Usuario**: admin
+- **Contraseña**: admin123
+
+## 🛠️ Configuración de Datasources
+
+### Loki Datasource
+- **URL**: `http://loki:3100`
+- **Access**: Server (proxy)
+- **Max Lines**: 1000
+
+### Prometheus Datasource  
+- **URL**: `http://prometheus:9090`
+- **Access**: Server (proxy)
+
+## 📋 Casos de Uso Investigativos
+
+### Investigación de Incidentes
+1. **"¿Quién intentó hackear el sistema?"**
+   - Filtrar por múltiples 401/403 consecutivos
+   - Revisar IPs con patrones anómalos
+
+2. **"¿Qué hizo el usuario X ayer?"**
+   - Buscar por IP específica + rango de tiempo
+   - Analizar secuencia de requests
+
+3. **"¿Cuándo empezó el ataque?"** 
+   - Buscar primer error anómalo en timeline
+   - Correlacionar con métricas de sistema
+
+4. **"¿Qué endpoints están siendo atacados?"**
+   - Agrupar errores por path
+   - Identificar patrones de reconocimiento
+
+### Performance y Monitoreo
+- **Latencia por endpoint**: Identificar APIs lentas
+- **Patrones de uso**: Horarios pico y valles
+- **SLA real**: Disponibilidad y tiempo de respuesta
+- **Capacidad**: Proyección de crecimiento

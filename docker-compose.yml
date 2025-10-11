@@ -64,6 +64,54 @@ services:
       - "traefik.http.routers.auth-api.middlewares=auth-strip"
     restart: unless-stopped
 
+  # API de Credenciales de Grafana - Monitoreo
+  monitoring_api:
+    build:
+      context: ./grafana_credentials_api
+      dockerfile: Dockerfile
+    container_name: monitoring_service
+    environment:
+      - JWT_SECRET_KEY=mi_clave_secreta_super_segura_12345
+      - SMTP_SERVER=smtp.gmail.com
+      - SMTP_PORT=587
+      - SMTP_USERNAME=hanckonunez@gmail.com
+      - SMTP_PASSWORD=alys dsys fwab fkal
+    networks:
+      - red_cloud
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.monitoring-api.rule=PathPrefix(`/monitoring`)"
+      - "traefik.http.routers.monitoring-api.entrypoints=websecure"
+      - "traefik.http.routers.monitoring-api.tls.certresolver=myresolver"
+      - "traefik.http.services.monitoring-api.loadbalancer.server.port=5800"
+      - "traefik.http.middlewares.monitoring-strip.stripprefix.prefixes=/monitoring"
+      - "traefik.http.routers.monitoring-api.middlewares=monitoring-strip"
+    restart: unless-stopped
+
+  # API de Gestión de Slices - Slice Manager
+  slice_manager_api:
+    build:
+      context: ./slice_manager_api
+      dockerfile: Dockerfile
+    container_name: slice_manager
+    environment:
+      - JWT_SECRET_KEY=mi_clave_secreta_super_segura_12345
+    networks:
+      - red_cloud
+    extra_hosts:
+      - "worker1:10.0.10.2"
+      - "worker2:10.0.10.3"
+      - "worker3:10.0.10.4"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.slice-manager-api.rule=PathPrefix(`/slices`)"
+      - "traefik.http.routers.slice-manager-api.entrypoints=websecure"
+      - "traefik.http.routers.slice-manager-api.tls.certresolver=myresolver"
+      - "traefik.http.services.slice-manager-api.loadbalancer.server.port=5900"
+      - "traefik.http.middlewares.slice-manager-strip.stripprefix.prefixes=/slices"
+      - "traefik.http.routers.slice-manager-api.middlewares=slice-manager-strip"
+    restart: unless-stopped
+
   # ========== SERVICIOS DE MONITOREO ==========
   # Prometheus - Recolección de métricas
   prometheus:

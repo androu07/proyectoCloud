@@ -26,13 +26,11 @@ scrape_configs:
             status: DownstreamStatus
             duration: Duration
             client_ip: ClientAddr
-            user_agent: request_User-Agent
             backend: ServiceName
       - labels:
           method:
           status:
           backend:
-          client_ip:
       - timestamp:
           source: timestamp
           format: RFC3339Nano

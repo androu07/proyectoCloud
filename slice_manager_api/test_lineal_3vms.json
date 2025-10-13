@@ -1,0 +1,53 @@
+{
+    "nombre_slice": "topologia-lineal-3vms",
+    "solicitud_json": {
+        "id_slice": "",
+        "cantidad_vms": "3",
+        "vlans_separadas": "",
+        "vlans_usadas": "",
+        "vncs_separadas": "",
+        "conexion_topologias": "",
+        "topologias": [
+            {
+                "nombre": "lineal",
+                "cantidad_vms": "3",
+                "internet": "si",
+                "vms": [
+                    {
+                        "nombre": "vm1",
+                        "cores": "1",
+                        "ram": "512M",
+                        "almacenamiento": "1G",
+                        "puerto_vnc": "",
+                        "image": "cirros-0.5.1-x86_64-disk.img",
+                        "conexiones_vlans": "",
+                        "acceso": "si",
+                        "server": ""
+                    },
+                    {
+                        "nombre": "vm2",
+                        "cores": "1",
+                        "ram": "512M",
+                        "almacenamiento": "1G",
+                        "puerto_vnc": "",
+                        "image": "cirros-0.5.1-x86_64-disk.img",
+                        "conexiones_vlans": "",
+                        "acceso": "no",
+                        "server": ""
+                    },
+                    {
+                        "nombre": "vm3",
+                        "cores": "1",
+                        "ram": "512M",
+                        "almacenamiento": "1G",
+                        "puerto_vnc": "",
+                        "image": "cirros-0.5.1-x86_64-disk.img",
+                        "conexiones_vlans": "",
+                        "acceso": "si",
+                        "server": ""
+                    }
+                ]
+            }
+        ]
+    }
+}

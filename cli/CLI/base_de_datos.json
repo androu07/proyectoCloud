@@ -1,0 +1,671 @@
+[
+  {
+    "id_slice": "",
+    "cantidad_vms": "2",
+    "vlans_separadas": "1",
+    "vlans_usadas": "",
+    "vncs_separadas": "",
+    "conexión_topologias": "",
+    "topologias": [
+      {
+        "nombre": "lineal",
+        "cantidad_vms": "2",
+        "internet": "no",
+        "vms": [
+          {
+            "nombre": "vm1",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "si",
+            "server": ""
+          },
+          {
+            "nombre": "vm2",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id_slice": "",
+    "cantidad_vms": "2",
+    "vlans_separadas": "2",
+    "vlans_usadas": "",
+    "vncs_separadas": "",
+    "conexión_topologias": "",
+    "topologias": [
+      {
+        "nombre": "lineal",
+        "cantidad_vms": "2",
+        "internet": "no",
+        "vms": [
+          {
+            "nombre": "vm1",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          },
+          {
+            "nombre": "vm2",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id_slice": "",
+    "cantidad_vms": "2",
+    "vlans_separadas": "3",
+    "vlans_usadas": "",
+    "vncs_separadas": "",
+    "conexión_topologias": "",
+    "topologias": [
+      {
+        "nombre": "lineal",
+        "cantidad_vms": "2",
+        "internet": "no",
+        "vms": [
+          {
+            "nombre": "vm1",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          },
+          {
+            "nombre": "vm2",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id_slice": "",
+    "cantidad_vms": "2",
+    "vlans_separadas": "4",
+    "vlans_usadas": "",
+    "vncs_separadas": "",
+    "conexión_topologias": "",
+    "topologias": [
+      {
+        "nombre": "lineal",
+        "cantidad_vms": "2",
+        "internet": "no",
+        "vms": [
+          {
+            "nombre": "vm1",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          },
+          {
+            "nombre": "vm2",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id_slice": "",
+    "cantidad_vms": "2",
+    "vlans_separadas": "5",
+    "vlans_usadas": "",
+    "vncs_separadas": "",
+    "conexión_topologias": "",
+    "topologias": [
+      {
+        "nombre": "lineal",
+        "cantidad_vms": "2",
+        "internet": "no",
+        "vms": [
+          {
+            "nombre": "vm1",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          },
+          {
+            "nombre": "vm2",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id_slice": "",
+    "cantidad_vms": "2",
+    "vlans_separadas": "6",
+    "vlans_usadas": "",
+    "vncs_separadas": "",
+    "conexión_topologias": "",
+    "topologias": [
+      {
+        "nombre": "lineal",
+        "cantidad_vms": "2",
+        "internet": "no",
+        "vms": [
+          {
+            "nombre": "vm1",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          },
+          {
+            "nombre": "vm2",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "ubuntu-18.04-minimal-cloudimg-amd64.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id_slice": "",
+    "cantidad_vms": "2",
+    "vlans_separadas": "7",
+    "vlans_usadas": "",
+    "vncs_separadas": "",
+    "conexión_topologias": "",
+    "topologias": [
+      {
+        "nombre": "lineal",
+        "cantidad_vms": "2",
+        "internet": "no",
+        "vms": [
+          {
+            "nombre": "vm1",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          },
+          {
+            "nombre": "vm2",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id_slice": "",
+    "cantidad_vms": "2",
+    "vlans_separadas": "8",
+    "vlans_usadas": "",
+    "vncs_separadas": "",
+    "conexión_topologias": "",
+    "topologias": [
+      {
+        "nombre": "lineal",
+        "cantidad_vms": "2",
+        "internet": "no",
+        "vms": [
+          {
+            "nombre": "vm1",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          },
+          {
+            "nombre": "vm2",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id_slice": "",
+    "cantidad_vms": "2",
+    "vlans_separadas": "9",
+    "vlans_usadas": "",
+    "vncs_separadas": "",
+    "conexión_topologias": "",
+    "topologias": [
+      {
+        "nombre": "lineal",
+        "cantidad_vms": "2",
+        "internet": "no",
+        "vms": [
+          {
+            "nombre": "vm1",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          },
+          {
+            "nombre": "vm2",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id_slice": "",
+    "cantidad_vms": "2",
+    "vlans_separadas": "10",
+    "vlans_usadas": "",
+    "vncs_separadas": "",
+    "conexión_topologias": "",
+    "topologias": [
+      {
+        "nombre": "lineal",
+        "cantidad_vms": "2",
+        "internet": "no",
+        "vms": [
+          {
+            "nombre": "vm1",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          },
+          {
+            "nombre": "vm2",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id_slice": "",
+    "cantidad_vms": "2",
+    "vlans_separadas": "11",
+    "vlans_usadas": "",
+    "vncs_separadas": "",
+    "conexión_topologias": "",
+    "topologias": [
+      {
+        "nombre": "lineal",
+        "cantidad_vms": "2",
+        "internet": "no",
+        "vms": [
+          {
+            "nombre": "vm1",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          },
+          {
+            "nombre": "vm2",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id_slice": "1",
+    "cantidad_vms": "5",
+    "vlans_separadas": "12",
+    "vlans_usadas": "",
+    "vncs_separadas": "",
+    "conexión_topologias": "vm2-vm3",
+    "topologias": [
+      {
+        "nombre": "lineal",
+        "cantidad_vms": "2",
+        "internet": "no",
+        "vms": [
+          {
+            "nombre": "vm1",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          },
+          {
+            "nombre": "vm2",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "2G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          }
+        ]
+      },
+      {
+        "nombre": "anillo",
+        "cantidad_vms": "3",
+        "internet": "no",
+        "vms": [
+          {
+            "nombre": "vm3",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "ubuntu-18.04-minimal-cloudimg-amd64.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          },
+          {
+            "nombre": "vm4",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "2.5G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          },
+          {
+            "nombre": "vm5",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "2G",
+            "puerto_vnc": "",
+            "image": "generic_alpine-3.20.0-x86_64-bios-cloudinit-r0.qcow2",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          }
+        ]
+      }
+    ],
+    "owner": "rodrigolujanf28@gmail.com"
+  },
+  {
+    "id_slice": "2",
+    "cantidad_vms": "5",
+    "vlans_separadas": "13",
+    "vlans_usadas": "",
+    "vncs_separadas": "",
+    "conexión_topologias": "vm2-vm3",
+    "topologias": [
+      {
+        "nombre": "lineal",
+        "cantidad_vms": "2",
+        "internet": "no",
+        "vms": [
+          {
+            "nombre": "vm1",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          },
+          {
+            "nombre": "vm2",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          }
+        ]
+      },
+      {
+        "nombre": "anillo",
+        "cantidad_vms": "3",
+        "internet": "no",
+        "vms": [
+          {
+            "nombre": "vm3",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          },
+          {
+            "nombre": "vm4",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          },
+          {
+            "nombre": "vm5",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          }
+        ]
+      }
+    ],
+    "owner": "rodrigolujanf28@gmail.com"
+  },
+  {
+    "id_slice": "3",
+    "cantidad_vms": "5",
+    "vlans_separadas": "14",
+    "vlans_usadas": "",
+    "vncs_separadas": "",
+    "conexión_topologias": "",
+    "topologias": [
+      {
+        "nombre": "lineal",
+        "cantidad_vms": "2",
+        "internet": "no",
+        "vms": [
+          {
+            "nombre": "vm1",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          },
+          {
+            "nombre": "vm2",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          }
+        ]
+      },
+      {
+        "nombre": "anillo",
+        "cantidad_vms": "3",
+        "internet": "no",
+        "vms": [
+          {
+            "nombre": "vm3",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "puerto_vnc": "",
+            "image": "ubuntu-18.04-minimal-cloudimg-amd64.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          },
+          {
+            "nombre": "vm4",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "2.5G",
+            "puerto_vnc": "",
+            "image": "ubuntu-18.04-minimal-cloudimg-amd64.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          },
+          {
+            "nombre": "vm5",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "2.5G",
+            "puerto_vnc": "",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "conexiones_vlans": "",
+            "acceso": "no",
+            "server": ""
+          }
+        ]
+      }
+    ],
+    "owner": "maria.garcia@email.com"
+  }
+]

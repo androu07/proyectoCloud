@@ -1,0 +1,1157 @@
+# --- FUNCIONES DE TOPOLOGÍA MIXTA Y DETALLES MEJORADOS ---
+def get_flavor_specs(flavor_name):
+    """Obtener especificaciones de un flavor"""
+    flavors = {
+        'tiny': {'cpu': 1, 'memory': 512, 'disk': 1},
+        'small': {'cpu': 1, 'memory': 2048, 'disk': 20},
+        'medium': {'cpu': 2, 'memory': 4096, 'disk': 40},
+        'large': {'cpu': 4, 'memory': 8192, 'disk': 80},
+        'xlarge': {'cpu': 8, 'memory': 16384, 'disk': 160}
+    }
+    return flavors.get(flavor_name, flavors['small'])
+
+def select_flavor():
+    """Seleccionar un flavor para las VMs"""
+    print("\n  Flavors disponibles:")
+    print("  1. Tiny   (1 vCPU, 512MB RAM, 1GB Disk)")
+    print("  2. Small  (1 vCPU, 2GB RAM, 20GB Disk)")
+    print("  3. Medium (2 vCPU, 4GB RAM, 40GB Disk)")
+    print("  4. Large  (4 vCPU, 8GB RAM, 80GB Disk)")
+    print("  5. XLarge (8 vCPU, 16GB RAM, 160GB Disk)")
+    choice = input("\n  Seleccione flavor (1-5): ")
+    flavors = ['tiny', 'small', 'medium', 'large', 'xlarge']
+    if choice.isdigit() and 1 <= int(choice) <= 5:
+        return flavors[int(choice) - 1]
+    return 'small'  # Default
+
+def create_topology_segment(segment_number):
+    """Crear un segmento de topología"""
+    print(f"\n  --- TOPOLOGÍA {segment_number} ---")
+    print("  Tipos de topología:")
+    print("  1. VM Individual")
+    print("  2. Lineal")
+    print("  3. Anillo")
+    print("  4. Árbol")
+    print("  5. Malla")
+    print("  6. Bus")
+    topo_choice = input("  Seleccione tipo (1-6): ")
+    topo_types = {
+        '1': 'single_vm',
+        '2': 'lineal',
+        '3': 'anillo',
+        '4': 'arbol',
+        '5': 'malla',
+        '6': 'bus'
+    }
+    topology_type = topo_types.get(topo_choice, 'lineal')
+    # Determinar número de VMs según la topología
+    if topology_type == 'single_vm':
+        num_vms = 1
+    else:
+        if topology_type == 'lineal':
+            print("  Número de VMs (2-10): ", end="")
+            num_vms = int(input())
+            num_vms = max(2, min(10, num_vms))
+        elif topology_type == 'anillo':
+            print("  Número de VMs (3-10): ", end="")
+            num_vms = int(input())
+            num_vms = max(3, min(10, num_vms))
+        else:
+            print("  Número de VMs (2-10): ", end="")
+            num_vms = int(input())
+            num_vms = max(2, min(10, num_vms))
+    # Seleccionar flavor
+    flavor = select_flavor()
+    return {
+        'type': topology_type,
+        'num_vms': num_vms,
+        'flavor': flavor
+    }
+
+def create_mixed_slice(slice_manager, user):
+    """Crear un slice con topología mixta"""
+    print_header(user)
+    print(Colors.BOLD + "\n  CREAR SLICE CON TOPOLOGÍA MIXTA" + Colors.ENDC)
+    name = input("\n  Nombre del slice: ")
+    topology_segments = []
+    # Primera topología (obligatoria)
+    segment = create_topology_segment(1)
+    topology_segments.append(segment)
+    # Preguntar si quiere añadir más topologías (máximo 4)
+    for i in range(2, 5):  # Permite hasta 4 topologías
+        add_more = input(f"\n  ¿Desea añadir otra topología al slice? (s/n): ")
+        if add_more.lower() != 's':
+            break
+        segment = create_topology_segment(i)
+        topology_segments.append(segment)
+    # Crear el slice con los segmentos de topología
+    slice_data = {
+        'name': name,
+        'topology': 'mixta',
+        'topology_segments': topology_segments
+    }
+    slice = slice_manager.create_mixed_slice(slice_data, user.username)
+    print(Colors.GREEN + f"\n  ✓ Slice mixto creado: {slice.id}" + Colors.ENDC)
+    print(f"  Total de topologías: {len(topology_segments)}")
+    print(f"  Total de VMs: {sum(seg['num_vms'] for seg in topology_segments)}")
+    input("\n  Presione Enter para continuar...")
+
+def show_slice_details_enhanced(slice_manager, user=None):
+    """Mostrar detalles mejorados del slice con conexiones"""
+    print_header(user)
+    print(Colors.BOLD + "\n  DETALLES DE SLICE" + Colors.ENDC)
+    if user:
+        slices = [s for s in slice_manager.get_slices() if s.owner == user.username]
+    else:
+        slices = slice_manager.list_slices()
+    if not slices:
+        print("\n  No hay slices disponibles")
+        input("\n  Presione Enter para continuar...")
+        return
+    # Mostrar lista de slices
+    print("\n  Slices disponibles:")
+    for i, s in enumerate(slices, 1):
+        print(f"  {i}. {s.name} ({s.id})")
+    choice = input("\n  Seleccione slice (0 para cancelar): ")
+    if choice == '0' or not choice.isdigit():
+        return
+    idx = int(choice) - 1
+    if idx < 0 or idx >= len(slices):
+        print("  Opción inválida")
+        return
+    slice = slices[idx]
+    # Mostrar información general
+    print(f"\n{'='*50}")
+    print(f"  SLICE: {slice.name}")
+    print(f"{'='*50}")
+    print(f"  ID: {slice.id}")
+    print(f"  Propietario: {slice.owner}")
+    topo_type = slice.topology.value if hasattr(slice.topology, 'value') else slice.topology
+    print(f"  Topología: {topo_type.capitalize()}")
+    print(f"  Estado: {slice.status}")
+
+    # Opción para mostrar imagen de la topología
+    print("\n  Opciones de visualización:")
+    print("  1. Ver topología como imagen (grafo)")
+    print("  0. Volver")
+    opt = input("\n  Seleccione opción: ")
+    if opt == '1':
+        # Si es Enum, usar .value, si es str, usar directamente
+        topo_type = slice.topology.value if hasattr(slice.topology, 'value') else slice.topology
+        draw_topology_graph(topo_type, len(slice.vms))
+        input("\n  Presione Enter para continuar...")
+    print(f"  Creado: {slice.created_at}")
+    # Mostrar enlaces según la topología
+    print(f"\n  Enlaces:")
+    print("  +---------+---------+")
+    print("  | nodo1   | nodo2   |")
+    print("  +---------+---------+")
+    topo_type = slice.topology.value if hasattr(slice.topology, 'value') else slice.topology
+    if topo_type == 'lineal':
+        for i in range(len(slice.vms) - 1):
+            print(f"  | VM{i}     | VM{i+1}     |")
+    elif topo_type == 'anillo':
+        for i in range(len(slice.vms)):
+            next_vm = (i + 1) % len(slice.vms)
+            print(f"  | VM{i}     | VM{next_vm}     |")
+    elif topo_type == 'malla':
+        for i in range(len(slice.vms)):
+            for j in range(i + 1, len(slice.vms)):
+                print(f"  | VM{i}     | VM{j}     |")
+    elif topo_type == 'arbol':
+        # Árbol binario simple
+        for i in range(1, len(slice.vms)):
+            parent = (i - 1) // 2
+            print(f"  | VM{parent}     | VM{i}     |")
+    elif topo_type == 'bus':
+        for i in range(len(slice.vms)):
+            print(f"  | Bus     | VM{i}     |")
+    elif topo_type == 'mixta':
+        print(f"\n  Enlaces por segmentos:")
+        # Mostrar las conexiones de cada segmento
+        current_vm = 0
+        
+        # Primer segmento (lineal con 2 VMs)
+        print("\n  Segmento 1 (Lineal):")
+        print(f"  | VM{current_vm}     | VM{current_vm+1}     |")
+        
+        # Segundo segmento (anillo con 4 VMs)
+        print("\n  Segmento 2 (Anillo):")
+        start_vm = current_vm + 2
+        for i in range(4):
+            next_vm = start_vm + ((i + 1) % 4)
+            print(f"  | VM{start_vm + i}     | VM{next_vm}     |")
+        
+        # Conexión entre segmentos
+        print("\n  Conexión entre segmentos:")
+        print(f"  | VM1     | VM2     |")
+    print("  +---------+---------+")
+    # Mostrar detalles de VMs
+    print(f"\n  Máquinas Virtuales:")
+    print("  +" + "="*60 + "+")
+    print("  | nombre   | recursos                                      |")
+    print("  +" + "="*10 + "+" + "="*48 + "+")
+    for vm in slice.vms:
+        resources = f"almacenamiento: {vm.disk}GB, coresCpu: {vm.cpu}, ram: {vm.memory/1024:.0f}GB"
+        vm_name = vm.name[:8].ljust(8)
+        print(f"  | {vm_name} | {resources:<47} |")
+    print("  +" + "="*60 + "+")
+    # Mostrar gráfico ASCII de la topología
+    print(f"\n  Visualización de la topología:")
+    draw_topology(slice.topology, len(slice.vms))
+    input("\n  Presione Enter para continuar...")
+
+# --- MENÚ CLIENTE ACTUALIZADO ---
+def cliente_menu_updated(auth_manager, slice_manager):
+    """Menú actualizado para CLIENTE con topología mixta"""
+    while True:
+        print_header(auth_manager.current_user)
+        print(Colors.BOLD + "\n  MENÚ CLIENTE" + Colors.ENDC)
+        print("  " + "="*40)
+        print(Colors.YELLOW + "\n  Mis Recursos:" + Colors.ENDC)
+        print("  1. Ver MIS Slices")
+        print("  2. Crear Slice Simple")
+        print("  3. Crear Slice con Topología Mixta")
+        print("  4. Ver Detalles de Slice")
+        print("  5. Eliminar MI Slice")
+        print("  6. Ver Estado de MIS Recursos")
+        print(Colors.YELLOW + "\n  Acceso:" + Colors.ENDC)
+        print("  7. Acceder a UI")
+        print("  8. Acceder a APIs")
+        print("  9. Ver MIS Logs")
+        print(Colors.RED + "\n  0. Cerrar Sesión" + Colors.ENDC)
+        choice = input("\n  Seleccione opción: ")
+        if choice == '1':
+            view_my_slices(slice_manager, auth_manager.current_user)
+        elif choice == '2':
+            create_slice_basic(slice_manager, auth_manager.current_user)
+        elif choice == '3':
+            create_mixed_slice(slice_manager, auth_manager.current_user)
+        elif choice == '4':
+            show_slice_details_enhanced(slice_manager, auth_manager.current_user)
+        elif choice == '5':
+            delete_my_slice(slice_manager, auth_manager.current_user)
+        elif choice == '6':
+            view_my_resources(slice_manager, auth_manager.current_user)
+        elif choice == '7':
+            access_ui()
+        elif choice == '8':
+            access_apis()
+        elif choice == '9':
+            view_my_logs(auth_manager.current_user)
+        elif choice == '0':
+            auth_manager.logout()
+            break
+import os
+import sys
+import time
+import asyncio
+import matplotlib.pyplot as plt
+import networkx as nx
+from slice_manager.manager import SliceManager
+from auth_manager import AuthManager
+from slice_manager.models import UserRole, SliceCreate, TopologyType
+
+
+# ============================================================================
+# COLORES PARA LA TERMINAL
+# ============================================================================
+class Colors:
+    HEADER = '\033[95m'
+    BLUE = '\033[94m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+
+
+# ============================================================================
+# FUNCIONES DE VISUALIZACIÓN DE TOPOLOGÍAS
+# ============================================================================
+
+def draw_topology_graph(topology_type: str, num_vms: int):
+    """Dibuja la topología como un grafo usando networkx y matplotlib"""
+    G = nx.Graph()
+    labels = {i: f"Máquina {i+1}" for i in range(num_vms)}
+    
+    # Crear nodos
+    for i in range(num_vms):
+        G.add_node(i)
+    
+    # Crear conexiones según topología
+    if topology_type == 'lineal':
+        for i in range(num_vms-1):
+            G.add_edge(i, i+1)
+    elif topology_type == 'anillo':
+        for i in range(num_vms):
+            G.add_edge(i, (i+1) % num_vms)
+    elif topology_type == 'arbol':
+        # Simple árbol binario
+        for i in range(1, num_vms):
+            G.add_edge((i-1)//2, i)
+    elif topology_type == 'malla':
+        for i in range(num_vms):
+            for j in range(i+1, num_vms):
+                G.add_edge(i, j)
+    elif topology_type == 'bus':
+        for i in range(num_vms):
+            G.add_edge(i, 'bus')
+        labels['bus'] = 'Bus Central'
+    elif topology_type == 'mixta':
+        # Para topología mixta, crear un layout más simple con todas las VMs
+        for i in range(num_vms-1):
+            G.add_edge(i, i+1)  # Conectar VMs secuencialmente
+        # Conectar última con primera para hacer un círculo
+        G.add_edge(num_vms-1, 0)
+    
+    # Configurar layout según topología
+    pos = None
+    if topology_type == 'anillo':
+        pos = nx.circular_layout(G)
+    elif topology_type == 'lineal':
+        pos = nx.spring_layout(G)
+    elif topology_type == 'arbol':
+        pos = nx.spring_layout(G)
+    elif topology_type == 'malla':
+        pos = nx.spring_layout(G)
+    elif topology_type == 'bus':
+        pos = nx.spring_layout(G)
+    elif topology_type == 'mixta':
+        pos = nx.spring_layout(G, k=1)
+    
+    # Dibujar grafo
+    plt.figure(figsize=(8, 8))
+    nx.draw(G, pos, with_labels=True, labels=labels, node_color='skyblue', 
+            node_size=1500, font_size=10, font_weight='bold', arrows=False)
+    plt.title(f"Topología: {topology_type.capitalize()} ({num_vms} VMs)")
+    plt.show()
+
+
+def draw_topology(topology_type: str, num_vms: int):
+    """Visualización ASCII clara y profesional de topologías"""
+    
+    if topology_type == 'lineal' or topology_type == 'linear':
+        # Cadena lineal
+        print("  ", end="")
+        for i in range(num_vms):
+            print(f"[VM{i}]", end="")
+            if i < num_vms - 1:
+                print("──", end="")
+        print("\n")
+
+    elif topology_type == 'anillo' or topology_type == 'ring':
+        # Representación de anillo
+        if num_vms <= 6:
+            # Dibujo ASCII para pocos nodos
+            if num_vms == 3:
+                print("      ╔═VM0═╗")
+                print("      ║     ║")
+                print("    VM2═════VM1")
+            elif num_vms == 4:
+                print("    VM0═════VM1")
+                print("     ║       ║")
+                print("     ║       ║")
+                print("    VM3═════VM2")
+            elif num_vms == 5:
+                print("        VM0")
+                print("       ╱   ╲")
+                print("     VM4   VM1")
+                print("      │     │")
+                print("     VM3───VM2")
+            elif num_vms == 6:
+                print("     VM0───VM1")
+                print("      │     │")
+                print("    VM5     VM2")
+                print("      │     │")
+                print("     VM4───VM3")
+        else:
+            # Representación textual para muchos nodos
+            print("  ┌─────────────────────────┐")
+            print("  │    Anillo Circular      │")
+            print("  └─────────────────────────┘")
+            print("\n  Conexiones:")
+            for i in range(min(5, num_vms)):
+                next_node = (i + 1) % num_vms
+                print(f"    VM{i} ↔ VM{next_node}")
+            if num_vms > 5:
+                print(f"    ... ({num_vms - 5} conexiones más)")
+    
+    elif topology_type == 'arbol' or topology_type == 'tree':
+        print("         [VM0]")
+        print("        /  |  \\")
+        if num_vms >= 3:
+            print("    VM1  VM2  VM3")
+        if num_vms >= 7:
+            print("    / \\   |   / \\")
+            print("  VM4 VM5 VM6 VM7")
+    
+    elif topology_type == 'malla' or topology_type == 'mesh':
+        if num_vms <= 4:
+            print("  Todos ↔ Todos")
+            print("  ┌───────────┐")
+            for i in range(num_vms):
+                print(f"  │    VM{i}    │")
+            print("  └───────────┘")
+        else:
+            print(f"  Malla completa: {num_vms} nodos")
+            print(f"  Enlaces totales: {num_vms*(num_vms-1)//2}")
+    
+    elif topology_type == 'bus':
+        print("  ═══════[BUS CENTRAL]═══════")
+        for i in range(num_vms):
+            print(f"           │")
+            print(f"         [VM{i}]")
+    
+    # Información adicional
+    print(f"\n  Estado: Activo")
+    print(f"  Conexiones: Establecidas")
+    print()  # Línea en blanco al final
+
+
+def ver_detalles_slice(slice_manager, user=None):
+    """Permite seleccionar y ver detalles completos de un slice, incluyendo el dibujo de la topología"""
+    if user:
+        slices = [s for s in slice_manager.get_slices() if s.owner == user.username]
+    else:
+        slices = slice_manager.get_slices()
+    
+    if not slices:
+        print("\nNo hay slices disponibles.")
+        input("Presione Enter para continuar...")
+        return
+
+    print("\nSlices disponibles:")
+    for i, s in enumerate(slices, 1):
+        print(f"  {i}. {s.name} (ID: {s.id})")
+
+    choice = input("\nSeleccione el número del slice (0 para cancelar): ")
+    if choice == '0' or not choice.isdigit():
+        return
+    
+    idx = int(choice) - 1
+    if idx < 0 or idx >= len(slices):
+        print("Opción inválida.")
+        return
+    
+    s = slices[idx]
+    print(f"\n{'='*40}\nDETALLES DEL SLICE\n{'='*40}")
+    print(f"ID: {s.id}")
+    print(f"Nombre: {s.name}")
+    print(f"Topología: {s.topology.value}")
+    print(f"Propietario: {s.owner}")
+    print(f"Creado: {s.created_at}")
+    print(f"Estado: {getattr(s, 'status', 'N/A')}")
+    print(f"VMs: {len(s.vms)}")
+    print(f"CPU por VM: {s.vms[0].cpu if s.vms else 'N/A'}")
+    print(f"Memoria por VM: {s.vms[0].memory if s.vms else 'N/A'} MB")
+    print(f"Disco por VM: {s.vms[0].disk if s.vms else 'N/A'} GB")
+    
+    print(f"\n--- Dibujo de la topología (ASCII) ---")
+    draw_topology(s.topology.value, len(s.vms))
+    
+    print(f"\n¿Desea ver la topología en modo gráfico? (s/n): ", end="")
+    ver_grafico = input().lower()
+    if ver_grafico == 's':
+        draw_topology_graph(s.topology.value, len(s.vms))
+    
+    print(f"\nMáquinas Virtuales:")
+    for vm in s.vms:
+        print(f"  - {vm.name} | CPU: {vm.cpu} | RAM: {vm.memory}MB | Disco: {vm.disk}GB | Estado: {getattr(vm, 'status', 'N/A')}")
+    
+    input("\nPresione Enter para continuar...")
+
+
+# ============================================================================
+# FUNCIONES DE INTERFAZ DE USUARIO
+# ============================================================================
+
+def clear_screen():
+    """Limpiar la pantalla de la terminal"""
+    os.system('cls' if os.name == 'nt' else 'clear')
+
+
+def print_header(user=None):
+    """Imprimir encabezado principal"""
+    clear_screen()
+    print(Colors.BOLD + Colors.BLUE + "="*60 + Colors.ENDC)
+    print(Colors.BOLD + Colors.GREEN + "BIENVENIDO A PUCP CLOUD ORCHESTRATOR" + Colors.ENDC)
+    print(Colors.BOLD + Colors.BLUE + "="*60 + Colors.ENDC)
+    if user:
+        print(f"  Usuario: {Colors.YELLOW}{user.username}{Colors.ENDC} | Rol: {Colors.GREEN}{user.role.value.upper()}{Colors.ENDC}")
+        print(Colors.BLUE + "-"*60 + Colors.ENDC)
+
+
+def login_screen(auth_manager):
+    """Pantalla de login"""
+    while True:
+        print_header()
+        print("\n" + Colors.BOLD + "  AUTENTICACIÓN" + Colors.ENDC)
+        print("  " + "-"*30)
+        
+        # Mostrar credenciales disponibles para demo
+        print("\n  " + Colors.YELLOW + "Credenciales de prueba:" + Colors.ENDC)
+        print("  • superadmin / superadmin")
+        print("  • admin / admin")
+        print("  • cliente / cliente")
+        print()
+        
+        username = input("  Usuario: ")
+        password = input("  Contraseña: ")
+        
+        if auth_manager.login(username, password):
+            print(Colors.GREEN + "\n  ✓ Autenticación exitosa!" + Colors.ENDC)
+            time.sleep(1)
+            return True
+        else:
+            print(Colors.RED + "\n  ✗ Credenciales incorrectas" + Colors.ENDC)
+            time.sleep(2)
+
+
+# ============================================================================
+# MENÚS PRINCIPALES POR ROL
+# ============================================================================
+
+def superadmin_menu(auth_manager, slice_manager):
+    """Menú completo para SUPERADMIN"""
+    while True:
+        print_header(auth_manager.current_user)
+        print(Colors.BOLD + "\n  MENÚ SUPERADMIN" + Colors.ENDC)
+        print("  " + "="*40)
+        
+        # Funciones exclusivas de SUPERADMIN
+        print(Colors.YELLOW + "\n  Gestión de Usuarios:" + Colors.ENDC)
+        print("  1. Gestionar Usuarios")
+        
+        print(Colors.YELLOW + "\n  Gestión de Recursos:" + Colors.ENDC)
+        print("  2. Ver TODOS los Slices del Sistema")
+        print("  3. Crear Nuevo Slice")
+        print("  4. Eliminar CUALQUIER Slice")
+        print("  5. Gestionar Recursos Globales")
+        print("  6. Gestionar Topologías de Red")
+        
+        print(Colors.YELLOW + "\n  Monitoreo y Seguridad:" + Colors.ENDC)
+        print("  7. Monitorear TODO el Sistema")
+        print("  8. Ver TODOS los Logs del Sistema")
+        print("  9. Configurar Seguridad Global")
+        print("  10. Configurar Firewall/VPN")
+        
+        print(Colors.YELLOW + "\n  Clusters:" + Colors.ENDC)
+        print("  11. Provisionar en TODOS los Clusters")
+        print("  12. Acceder a Recursos OpenStack/Linux")
+        print("  13. Ver Detalles de un Slice")
+        
+        print(Colors.RED + "\n  0. Cerrar Sesión" + Colors.ENDC)
+        
+        choice = input("\n  Seleccione opción: ")
+        
+        if choice == '1':
+            manage_users()
+        elif choice == '2':
+            view_all_slices(slice_manager)
+        elif choice == '3':
+            create_slice_advanced(slice_manager, auth_manager.current_user)
+        elif choice == '4':
+            delete_any_slice(slice_manager)
+        elif choice == '5':
+            manage_global_resources(slice_manager)
+        elif choice == '6':
+            manage_topologies()
+        elif choice == '7':
+            monitor_entire_system(slice_manager)
+        elif choice == '8':
+            view_all_logs()
+        elif choice == '9':
+            configure_global_security()
+        elif choice == '10':
+            configure_firewall()
+        elif choice == '11':
+            provision_all_clusters()
+        elif choice == '12':
+            access_cluster_resources()
+        elif choice == '13':
+            ver_detalles_slice(slice_manager)
+        elif choice == '0':
+            auth_manager.logout()
+            break
+
+
+def admin_menu(auth_manager, slice_manager):
+    """Menú para ADMIN (área específica)"""
+    while True:
+        print_header(auth_manager.current_user)
+        print(Colors.BOLD + "\n  MENÚ ADMINISTRADOR" + Colors.ENDC)
+        print("  " + "="*40)
+        
+        print(Colors.YELLOW + "\n  Gestión de Recursos (Mi Área):" + Colors.ENDC)
+        print("  1. Ver Slices de MI ÁREA")
+        print("  2. Crear Nuevo Slice")
+        print("  3. Eliminar Slice de MI ÁREA")
+        print("  4. Gestionar Recursos de MI ÁREA")
+        print("  5. Gestionar Topologías")
+        
+        print(Colors.YELLOW + "\n  Monitoreo y Seguridad:" + Colors.ENDC)
+        print("  6. Monitorear MI ÁREA")
+        print("  7. Ver Logs de MI ÁREA")
+        print("  8. Configurar Seguridad de MI ÁREA")
+        print("  9. Ver Detalles de un Slice")
+        
+        print(Colors.YELLOW + "\n  Clusters:" + Colors.ENDC)
+        print("  10. Provisionar en MI ÁREA")
+        print("  11. Acceder APIs del Sistema")
+        
+        print(Colors.RED + "\n  0. Cerrar Sesión" + Colors.ENDC)
+        
+        choice = input("\n  Seleccione opción: ")
+        
+        if choice == '1':
+            view_area_slices(slice_manager, auth_manager.current_user)
+        elif choice == '2':
+            create_slice_advanced(slice_manager, auth_manager.current_user)
+        elif choice == '3':
+            delete_area_slice(slice_manager, auth_manager.current_user)
+        elif choice == '4':
+            manage_area_resources(slice_manager)
+        elif choice == '5':
+            manage_topologies()
+        elif choice == '6':
+            monitor_area(slice_manager, auth_manager.current_user)
+        elif choice == '7':
+            view_area_logs(auth_manager.current_user)
+        elif choice == '8':
+            configure_area_security()
+        elif choice == '9':
+            ver_detalles_slice(slice_manager, auth_manager.current_user)
+        elif choice == '10':
+            provision_area_clusters(auth_manager.current_user)
+        elif choice == '11':
+            access_apis()
+        elif choice == '0':
+            auth_manager.logout()
+            break
+
+
+def cliente_menu(auth_manager, slice_manager):
+    """Menú limitado para CLIENTE"""
+    while True:
+        print_header(auth_manager.current_user)
+        print(Colors.BOLD + "\n  MENÚ CLIENTE" + Colors.ENDC)
+        print("  " + "="*40)
+        
+        print(Colors.YELLOW + "\n  Mis Recursos:" + Colors.ENDC)
+        print("  1. Ver MIS Slices")
+        print("  2. Crear Nuevo Slice")
+        print("  3. Eliminar MI Slice")
+        print("  4. Ver Estado de MIS Recursos")
+        print("  5. Ver Detalles de un Slice")
+        
+        print(Colors.YELLOW + "\n  Acceso:" + Colors.ENDC)
+        print("  6. Acceder a UI")
+        print("  7. Acceder a APIs")
+        print("  8. Ver MIS Logs")
+        
+        print(Colors.RED + "\n  0. Cerrar Sesión" + Colors.ENDC)
+        
+        choice = input("\n  Seleccione opción: ")
+        
+        if choice == '1':
+            view_my_slices(slice_manager, auth_manager.current_user)
+        elif choice == '2':
+            asyncio.run(create_slice_basic(slice_manager, auth_manager.current_user))
+        elif choice == '3':
+            delete_my_slice(slice_manager, auth_manager.current_user)
+        elif choice == '4':
+            view_my_resources(slice_manager, auth_manager.current_user)
+        elif choice == '5':
+            ver_detalles_slice(slice_manager, auth_manager.current_user)
+        elif choice == '6':
+            access_ui()
+        elif choice == '7':
+            access_apis()
+        elif choice == '8':
+            view_my_logs(auth_manager.current_user)
+        elif choice == '0':
+            auth_manager.logout()
+            break
+
+
+# ============================================================================
+# FUNCIONES DE GESTIÓN DE SLICES
+# ============================================================================
+
+def create_slice_advanced(slice_manager, user):
+    """Crear slice con opciones avanzadas (SUPERADMIN/ADMIN)"""
+    print_header(user)
+    print(Colors.BOLD + "\n  CREAR SLICE AVANZADO" + Colors.ENDC)
+    
+    name = input("\n  Nombre del slice: ")
+    
+    print("\n  Topologías disponibles:")
+    topologies = ['lineal', 'anillo', 'arbol', 'malla', 'bus']
+    for i, t in enumerate(topologies, 1):
+        print(f"  {i}. {t.capitalize()}")
+    
+    top_choice = int(input("\n  Seleccione topología (1-5): "))
+    topology = topologies[top_choice-1]
+    
+    num_vms = int(input("  Número de VMs: "))
+    cpu = int(input("  CPUs por VM: "))
+    memory = int(input("  Memoria MB: "))
+    disk = int(input("  Disco GB: "))
+    
+    print("\n  Zonas de Disponibilidad:")
+    print("  1. Zona 1 - Linux Cluster")
+    print("  2. Zona 2 - OpenStack")
+    zone = int(input("  Seleccione zona: "))
+    
+    # Convertir la topología a TopologyType
+    try:
+        topology_enum = TopologyType(topology)
+    except ValueError:
+        topology_enum = TopologyType.LINEAR
+
+    slice_obj = SliceCreate(
+        name=name,
+        topology=topology_enum,
+        num_vms=num_vms,
+        cpu=cpu,
+        memory=memory,
+        disk=disk
+    )
+    
+    # Validar que no exista un slice con el mismo nombre y estado activo/creating
+    # Filtrar correctamente por usuario y nombre
+    existing = [s for s in slice_manager.get_slices() if s.name == name and s.owner == user.username and s.status in ("creating", "active")]
+    if existing:
+        print(Colors.RED + f"\n  Ya existe un slice activo/creando con ese nombre." + Colors.ENDC)
+        input("\n  Presione Enter para continuar...")
+        return
+    slice = slice_manager.create_slice(slice_obj, user.username)
+    print(Colors.GREEN + f"\n  ✓ Slice creado: {slice.id}" + Colors.ENDC)
+    
+    # Mostrar dibujo de la topología
+    print("\n  Topología creada:")
+    draw_topology(slice.topology.value, len(slice.vms))
+    
+    input("\n  Presione Enter para continuar...")
+
+
+def create_slice_basic(slice_manager, user):
+    """Crear slice básico (CLIENTE)"""
+    print_header(user)
+    print(Colors.BOLD + "\n  CREAR SLICE" + Colors.ENDC)
+    
+    name = input("\n  Nombre del slice: ")
+    # Validar que no exista un slice con el mismo nombre y estado activo/creating
+    # Filtrar correctamente por usuario y nombre
+    existing = [s for s in slice_manager.get_slices() if s.name == name and s.owner == user.username and s.status in ("creating", "active")]
+    if existing:
+        print(Colors.RED + f"\n  Ya existe un slice activo/creando con ese nombre." + Colors.ENDC)
+        input("\n  Presione Enter para continuar...")
+        return
+    
+    print("\nTopologías disponibles:")
+    print("1. Lineal")
+    print("2. Anillo")
+    print("3. Árbol")
+    print("4. Malla")
+    print("5. Bus")
+    
+    topology_choice = input("Seleccione topología (1-5): ")
+    topologies = {
+        '1': 'lineal',
+        '2': 'anillo',
+        '3': 'arbol',
+        '4': 'malla',
+        '5': 'bus'
+    }
+    
+    topology = topologies.get(topology_choice, 'lineal')
+    
+    num_vms = int(input("  Número de VMs: "))
+    vms_data = []
+    for i in range(num_vms):
+        print(f"\n  VM {i+1}:")
+        cpu = int(input(f"    CPUs para VM {i+1} (default 1): ") or "1")
+        memory = int(input(f"    Memoria MB para VM {i+1} (default 1024): ") or "1024")
+        disk = int(input(f"    Disco GB para VM {i+1} (default 10): ") or "10")
+        vms_data.append({
+            'name': f"VM{i+1}",
+            'cpu': cpu,
+            'memory': memory,
+            'disk': disk
+        })
+
+    try:
+        topology_enum = TopologyType(topology)
+    except ValueError:
+        topology_enum = TopologyType.LINEAR
+
+    # SliceCreate no soporta vms personalizados, así que pasamos solo el número y la primera VM como ejemplo
+    slice_obj = SliceCreate(
+        name=name,
+        topology=topology_enum,
+        num_vms=num_vms,
+        cpu=vms_data[0]['cpu'],
+        memory=vms_data[0]['memory'],
+        disk=vms_data[0]['disk']
+    )
+
+    # Crear lista de VMs personalizadas
+    from slice_manager.models import VM
+    from slice_manager.models import VM
+    vms_override = []
+    for i in range(num_vms):
+        vms_override.append(VM(
+            id=f"slice_temp_vm_{i}",
+            name=f"VM{i+1}",
+            cpu=vms_data[i]['cpu'],
+            memory=vms_data[i]['memory'],
+            disk=vms_data[i]['disk'],
+            status="pending",
+            flavor="small"
+        ))
+
+    # Crear slice pasando vms_override
+    slice = slice_manager.create_slice(slice_obj, user.username, vms_override=vms_override)
+
+    print(Colors.GREEN + f"\n  ✓ Slice creado: {slice.id}" + Colors.ENDC)
+
+    # Mostrar dibujo de la topología
+    draw_topology(slice.topology, len(slice.vms))
+
+    input("\n  Presione Enter para continuar...")
+
+
+def view_all_slices(slice_manager):
+    """Ver TODOS los slices (SUPERADMIN)"""
+    print_header()
+    print(Colors.BOLD + "\n  TODOS LOS SLICES DEL SISTEMA" + Colors.ENDC)
+    
+    slices = slice_manager.get_slices()
+    
+    if not slices:
+        print("\n  No hay slices en el sistema")
+    else:
+        print(f"\n  Total: {len(slices)} slices\n")
+        for s in slices:
+            print(f"  • {Colors.YELLOW}{s.id}{Colors.ENDC}")
+            print(f"    Nombre: {s.name}")
+            print(f"    Owner: {s.owner}")
+            print(f"    Topología: {s.topology}")
+            print(f"    VMs: {len(s.vms)}")
+            print(f"    Zona: {getattr(s, 'zone', 'N/A')}")
+            print()
+    
+    input("\n  Presione Enter para continuar...")
+
+
+def view_my_slices(slice_manager, user):
+    """Ver MIS slices (CLIENTE)"""
+    print_header(user)
+    print(Colors.BOLD + "\n  MIS SLICES" + Colors.ENDC)
+    
+    slices = [s for s in slice_manager.get_slices() if s.owner == user.username]
+    
+    if not slices:
+        print("\n  No tienes slices creados")
+    else:
+        for s in slices:
+            print(f"\n  • {Colors.YELLOW}{s.name}{Colors.ENDC}")
+            print(f"    ID: {s.id}")
+            print(f"    Topología: {s.topology}")
+            print(f"    VMs: {len(s.vms)}")
+    
+    input("\n  Presione Enter para continuar...")
+
+
+def delete_any_slice(slice_manager):
+    """Eliminar CUALQUIER slice (SUPERADMIN)"""
+    print_header()
+    print(Colors.BOLD + "\n  ELIMINAR CUALQUIER SLICE" + Colors.ENDC)
+    
+    slices = slice_manager.get_slices()
+    if not slices:
+        print("\n  No hay slices para eliminar")
+    else:
+        for i, s in enumerate(slices, 1):
+            print(f"  {i}. {s.id} - {s.name} (Owner: {s.owner})")
+        
+        choice = input("\n  Seleccione slice (0 para cancelar): ")
+        if choice != '0' and choice.isdigit():
+            idx = int(choice) - 1
+            if 0 <= idx < len(slices):
+                if input(f"  ¿Confirmar eliminación? (s/n): ").lower() == 's':
+                    slice_manager.delete_slice(slices[idx].id)
+                    print(Colors.GREEN + "  ✓ Slice eliminado" + Colors.ENDC)
+    
+    input("\n  Presione Enter para continuar...")
+
+
+def delete_my_slice(slice_manager, user):
+    """Eliminar MI slice (CLIENTE)"""
+    print_header(user)
+    print(Colors.BOLD + "\n  ELIMINAR MI SLICE" + Colors.ENDC)
+    
+    my_slices = [s for s in slice_manager.get_slices() if s.owner == user.username]
+    
+    if not my_slices:
+        print("\n  No tienes slices para eliminar")
+    else:
+        for i, s in enumerate(my_slices, 1):
+            print(f"  {i}. {s.name}")
+        
+        choice = input("\n  Seleccione slice (0 para cancelar): ")
+        if choice != '0' and choice.isdigit():
+            idx = int(choice) - 1
+            if 0 <= idx < len(my_slices):
+                if input(f"  ¿Confirmar eliminación? (s/n): ").lower() == 's':
+                    slice_manager.delete_slice(my_slices[idx].id)
+                    print(Colors.GREEN + "  ✓ Slice eliminado" + Colors.ENDC)
+    
+    input("\n  Presione Enter para continuar...")
+
+
+# ============================================================================
+# FUNCIONES AUXILIARES Y DE MONITOREO
+# ============================================================================
+
+def manage_users():
+    """Gestionar usuarios (SUPERADMIN)"""
+    print_header()
+    print(Colors.BOLD + "\n  GESTIÓN DE USUARIOS" + Colors.ENDC)
+    print("\n  [Función disponible solo para SUPERADMIN]")
+    print("\n  1. Ver usuarios")
+    print("  2. Crear usuario")
+    print("  3. Eliminar usuario")
+    print("  4. Modificar permisos")
+    input("\n  [En desarrollo] Presione Enter...")
+
+
+def monitor_entire_system(slice_manager):
+    """Monitorear TODO el sistema (SUPERADMIN)"""
+    print_header()
+    print(Colors.BOLD + "\n  MONITOR GLOBAL DEL SISTEMA" + Colors.ENDC)
+    
+    slices = slice_manager.get_slices()
+    total_vms = sum(len(s.vms) for s in slices)
+    
+    print(f"\n  Estadísticas Globales:")
+    print(f"  • Total Slices: {len(slices)}")
+    print(f"  • Total VMs: {total_vms}")
+    print(f"  • Zona 1 (Linux): {len([s for s in slices if getattr(s, 'zone', 1) == 1])} slices")
+    print(f"  • Zona 2 (OpenStack): {len([s for s in slices if getattr(s, 'zone', 1) == 2])} slices")
+    
+    if slices:
+        total_cpu = sum(vm.cpu for s in slices for vm in s.vms)
+        total_ram = sum(vm.memory for s in slices for vm in s.vms)
+        total_disk = sum(vm.disk for s in slices for vm in s.vms)
+        
+        print(f"\n  Recursos Totales:")
+        print(f"  • CPU: {total_cpu} cores")
+        print(f"  • RAM: {total_ram/1024:.1f} GB")
+        print(f"  • Disco: {total_disk} GB")
+    
+    input("\n  Presione Enter para continuar...")
+
+
+def view_area_slices(slice_manager, user):
+    """Ver slices del área (ADMIN)"""
+    print_header(user)
+    print(Colors.BOLD + "\n  SLICES DE MI ÁREA" + Colors.ENDC)
+    print("\n  [Mostrando slices del área asignada]")
+    slices = slice_manager.get_slices()
+    for s in slices:
+        print(f"  • {s.name} - {s.topology.value}")
+    input("\n  Presione Enter para continuar...")
+
+
+def manage_global_resources(slice_manager):
+    """Gestión de recursos globales"""
+    print_header()
+    print(Colors.BOLD + "\n  GESTIÓN DE RECURSOS GLOBALES" + Colors.ENDC)
+    print("\n  • Servidores disponibles: 8")
+    print("  • CPU total: 256 cores")
+    print("  • RAM total: 512 GB")
+    print("  • Storage: 10 TB")
+    input("\n  Presione Enter para continuar...")
+
+
+def manage_topologies():
+    """Gestión de topologías"""
+    print_header()
+    print(Colors.BOLD + "\n  GESTIÓN DE TOPOLOGÍAS" + Colors.ENDC)
+    print("\n  Topologías soportadas:")
+    print("  • Lineal")
+    print("  • Anillo")
+    print("  • Árbol")
+    print("  • Malla")
+    print("  • Bus")
+    input("\n  Presione Enter para continuar...")
+
+
+def view_all_logs():
+    """Ver logs del sistema"""
+    print_header()
+    print(Colors.BOLD + "\n  LOGS DEL SISTEMA" + Colors.ENDC)
+    print("\n  [2024-01-15 10:30:00] Sistema iniciado")
+    print("  [2024-01-15 10:31:00] Usuario admin autenticado")
+    print("  [2024-01-15 10:32:00] Slice creado: slice_1")
+    input("\n  Presione Enter para continuar...")
+
+
+def configure_global_security():
+    """Configurar seguridad global"""
+    print_header()
+    print(Colors.BOLD + "\n  CONFIGURACIÓN DE SEGURIDAD GLOBAL" + Colors.ENDC)
+    print("\n  • Firewall: Activo")
+    print("  • VPN: Configurada")
+    print("  • IDS/IPS: Activo")
+    input("\n  Presione Enter para continuar...")
+
+
+def configure_firewall():
+    """Configurar firewall"""
+    print_header()
+    print(Colors.BOLD + "\n  CONFIGURACIÓN DE FIREWALL" + Colors.ENDC)
+    print("\n  Reglas activas: 25")
+    print("  Puertos abiertos: 22, 80, 443, 8000")
+    input("\n  Presione Enter para continuar...")
+
+
+def provision_all_clusters():
+    """Provisionar clusters"""
+    print_header()
+    print(Colors.BOLD + "\n  PROVISIONAR EN TODOS LOS CLUSTERS" + Colors.ENDC)
+    print("\n  • Linux Cluster: Disponible")
+    print("  • OpenStack: Disponible")
+    input("\n  Presione Enter para continuar...")
+
+
+def access_cluster_resources():
+    """Acceder a recursos de cluster"""
+    print_header()
+    print(Colors.BOLD + "\n  RECURSOS DE CLUSTERS" + Colors.ENDC)
+    print("\n  Linux Cluster:")
+    print("  • Nodos: 4")
+    print("  • Estado: Activo")
+    print("\n  OpenStack:")
+    print("  • Nodos: 4")
+    print("  • Estado: Activo")
+    input("\n  Presione Enter para continuar...")
+
+
+def delete_area_slice(slice_manager, user):
+    """Eliminar slice del área"""
+    view_area_slices(slice_manager, user)
+
+
+def manage_area_resources(slice_manager):
+    """Gestionar recursos del área"""
+    print_header()
+    print(Colors.BOLD + "\n  RECURSOS DE MI ÁREA" + Colors.ENDC)
+    print("\n  • Servidores: 4")
+    print("  • CPU: 128 cores")
+    print("  • RAM: 256 GB")
+    input("\n  Presione Enter para continuar...")
+
+
+def monitor_area(slice_manager, user):
+    """Monitorear área"""
+    print_header(user)
+    print(Colors.BOLD + "\n  MONITOR DE MI ÁREA" + Colors.ENDC)
+    print("\n  Estado: Operativo")
+    print("  Slices activos: 3")
+    print("  Uso CPU: 45%")
+    print("  Uso RAM: 60%")
+    input("\n  Presione Enter para continuar...")
+
+
+def view_area_logs(user):
+    """Ver logs del área"""
+    print_header(user)
+    print(Colors.BOLD + "\n  LOGS DE MI ÁREA" + Colors.ENDC)
+    print(f"\n  Logs del área de {user.username}")
+    input("\n  Presione Enter para continuar...")
+
+
+def configure_area_security():
+    """Configurar seguridad del área"""
+    print_header()
+    print(Colors.BOLD + "\n  SEGURIDAD DE MI ÁREA" + Colors.ENDC)
+    print("\n  Configuración de seguridad local")
+    input("\n  Presione Enter para continuar...")
+
+
+def provision_area_clusters(user):
+    """Provisionar en área"""
+    print_header(user)
+    print(Colors.BOLD + "\n  PROVISIONAR EN MI ÁREA" + Colors.ENDC)
+    print(f"\n  Provisionando recursos en el área de {user.username}")
+    input("\n  Presione Enter para continuar...")
+
+
+def access_apis():
+    """Acceder a APIs"""
+    print_header()
+    print(Colors.BOLD + "\n  ACCESO A APIs" + Colors.ENDC)
+    print("\n  APIs disponibles:")
+    print("  • /api/slices")
+    print("  • /api/vms")
+    print("  • /api/resources")
+    input("\n  Presione Enter para continuar...")
+
+
+def view_my_resources(slice_manager, user):
+    """Ver mis recursos"""
+    print_header(user)
+    print(Colors.BOLD + "\n  MIS RECURSOS" + Colors.ENDC)
+    my_slices = [s for s in slice_manager.get_slices() if s.owner == user.username]
+    total_vms = sum(len(s.vms) for s in my_slices)
+    print(f"\n  • Slices: {len(my_slices)}")
+    print(f"  • VMs totales: {total_vms}")
+    input("\n  Presione Enter para continuar...")
+
+
+def access_ui():
+    """Acceder a UI"""
+    print_header()
+    print(Colors.BOLD + "\n  ACCESO A UI" + Colors.ENDC)
+    print("\n  UI disponible en: http://localhost:8000")
+    input("\n  Presione Enter para continuar...")
+
+
+def view_my_logs(user):
+    """Ver mis logs"""
+    print_header(user)
+    print(Colors.BOLD + "\n  MIS LOGS" + Colors.ENDC)
+    print(f"\n  Logs de actividad de {user.username}")
+    input("\n  Presione Enter para continuar...")
+
+
+# ============================================================================
+# FUNCIÓN PRINCIPAL
+# ============================================================================
+
+def main():
+    """Función principal del sistema"""
+    slice_manager = SliceManager()
+    auth_manager = AuthManager()
+    
+    while True:
+        # Login
+        if not auth_manager.current_user:
+            login_screen(auth_manager)
+        
+        # Redirigir según rol
+        if auth_manager.current_user:
+            if auth_manager.current_user.role == UserRole.SUPERADMIN:
+                superadmin_menu(auth_manager, slice_manager)
+            elif auth_manager.current_user.role == UserRole.ADMIN:
+                admin_menu(auth_manager, slice_manager)
+            elif auth_manager.current_user.role == UserRole.CLIENTE:
+                cliente_menu_updated(auth_manager, slice_manager)
+
+
+if __name__ == "__main__":
+    main()

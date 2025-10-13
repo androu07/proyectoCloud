@@ -123,6 +123,8 @@ services:
       - JWT_SECRET_KEY=mi_clave_secreta_super_segura_12345
     volumes:
       - /home/ubuntu/red_contenedores/orquestador/backupp:/scripts:ro
+      - /var/run/netns:/var/run/netns:shared
+      - /run/openvswitch:/run/openvswitch:rw
     networks:
       - red_cloud
     extra_hosts:
@@ -130,6 +132,10 @@ services:
       - "worker2:10.0.10.3"
       - "worker3:10.0.10.4"
       - "host:10.0.10.1"
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+    privileged: true
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.manager-linux-api.rule=PathPrefix(`/manager`)"

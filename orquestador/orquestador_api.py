@@ -232,6 +232,80 @@ async def cleanup_workers(slice_id: str) -> dict:
     
     return cleanup_results
 
+def check_internet_required(processed_config: Dict[str, Any]) -> bool:
+    """
+    Verificar si alguna topología requiere conectividad a internet
+    
+    Args:
+        processed_config: Configuración procesada con topologías
+    
+    Returns:
+        bool: True si alguna topología tiene internet="si"
+    """
+    topologias = processed_config.get('topologias', [])
+    
+    for topologia in topologias:
+        if topologia.get('internet', '').lower() == 'si':
+            return True
+    
+    return False
+
+async def configure_internet_connectivity(slice_id: str, vlans_usadas: str) -> dict:
+    """
+    Configurar conectividad a internet para VLANs usando internet_connectivity.sh
+    
+    Args:
+        slice_id: ID del slice
+        vlans_usadas: Rango de VLANs en formato "inicio;fin"
+    
+    Returns:
+        dict: Resultado de la configuración con éxito y detalles
+    """
+    try:
+        print(f"\n🌍 CONFIGURANDO CONECTIVIDAD A INTERNET")
+        print(f"Slice ID: {slice_id}, VLANs: {vlans_usadas}")
+        
+        result = {
+            'success': False,
+            'message': '',
+            'vlans_configured': [],
+            'script_output': ''
+        }
+        
+        # Ejecutar el script de conectividad a internet
+        script_path = "/home/ubuntu/red_contenedores/orquestador/backupp/internet_connectivity.sh"
+        # Escapar el rango de VLANs con comillas simples para evitar que bash interprete el punto y coma
+        cmd = f"{script_path} {slice_id} '{vlans_usadas}'"
+        
+        print(f"   🚀 Ejecutando: {cmd}")
+        
+        success, output = await run_sudo_command(cmd, timeout=60)
+        
+        result['script_output'] = output
+        result['success'] = success
+        
+        if success:
+            # Parsear VLANs configuradas del output
+            start_vlan, end_vlan = map(int, vlans_separadas.split(';'))
+            result['vlans_configured'] = list(range(start_vlan, end_vlan + 1))
+            result['message'] = f"Conectividad a internet configurada exitosamente para VLANs {vlans_separadas}"
+            
+            print(f"   ✅ Internet configurado para {len(result['vlans_configured'])} VLANs")
+        else:
+            result['message'] = f"Error configurando conectividad a internet: {output}"
+            print(f"   ❌ Error: {output}")
+        
+        return result
+        
+    except Exception as e:
+        print(f"   ❌ Excepción configurando internet: {str(e)}")
+        return {
+            'success': False,
+            'message': f"Excepción configurando conectividad: {str(e)}",
+            'vlans_configured': [],
+            'script_output': ''
+        }
+
 async def verify_deployment_and_cleanup_on_error(slice_id: str, expected_vlans: list) -> dict:
     """
     Verificación final simplificada del despliegue y cleanup automático en caso de errores
@@ -748,6 +822,41 @@ async def desplegar_slice(
         
         print(f"✅ Verificación final exitosa ({step_time:.2f}s)")
         
+        # PASO 5: Configurar conectividad a internet (si es requerida)
+        internet_result = {'success': True, 'configured': False}  # Default: no configurada pero sin error
+        
+        if check_internet_required(processed_config):
+            print(f"\n🌍 PASO 5: Configurando conectividad a internet...")
+            step_start = datetime.now()
+            
+            vlans_usadas = processed_config.get('vlans_usadas')
+            
+            if vlans_usadas:
+                internet_result = await configure_internet_connectivity(slice_id, vlans_usadas)
+                internet_result['configured'] = True
+                
+                step_time = (datetime.now() - step_start).total_seconds()
+                deployment_details['timing']['internet_connectivity'] = step_time
+                deployment_details['steps'].append({
+                    'step': 5,
+                    'name': 'Conectividad a internet',
+                    'status': 'SUCCESS' if internet_result['success'] else 'ERROR',
+                    'time_seconds': step_time,
+                    'details': internet_result
+                })
+                
+                if internet_result['success']:
+                    print(f"✅ Conectividad a internet configurada ({step_time:.2f}s)")
+                    print(f"   • {len(internet_result.get('vlans_configured', []))} VLANs conectadas")
+                else:
+                    print(f"⚠️  Error configurando conectividad a internet ({step_time:.2f}s)")
+                    print(f"   • Error: {internet_result['message']}")
+                    # Nota: No falla el despliegue, solo registra el error
+            else:
+                print(f"⚠️  No se pudo obtener vlans_usadas para configurar internet")
+        else:
+            print(f"\n📋 Conectividad a internet no requerida (ninguna topología con internet='si')")
+        
         # RESUMEN FINAL (solo si la verificación fue exitosa)
         total_time = (datetime.now() - start_time).total_seconds()
         deployment_details['timing']['total'] = total_time
@@ -759,11 +868,27 @@ async def desplegar_slice(
             'failed_vms': len(failed_vms),
             'dhcp_vlans_created': len(dhcp_result.get('created_vlans', [])),
             'deployment_time_seconds': total_time,
-            'verification_passed': True
+            'verification_passed': True,
+            'internet_connectivity': {
+                'required': check_internet_required(processed_config),
+                'configured': internet_result.get('configured', False),
+                'success': internet_result.get('success', True),
+                'vlans_connected': len(internet_result.get('vlans_configured', []))
+            }
         }
         
         vm_success = len(failed_vms) == 0
-        message = f"Slice {slice_id} desplegado y verificado exitosamente - {len(deployed_vms)}/{len(deployed_vms) + len(failed_vms)} VMs"
+        internet_status = ""
+        
+        if internet_result.get('configured', False):
+            if internet_result.get('success', False):
+                internet_status = f" - Internet: ✅ {len(internet_result.get('vlans_configured', []))} VLANs"
+            else:
+                internet_status = f" - Internet: ❌ Error configuración"
+        elif check_internet_required(processed_config):
+            internet_status = f" - Internet: ⚠️ Requerido pero no configurado"
+        
+        message = f"Slice {slice_id} desplegado y verificado exitosamente - {len(deployed_vms)}/{len(deployed_vms) + len(failed_vms)} VMs{internet_status}"
         
         print(f"\n🎉 DESPLIEGUE COMPLETADO ({total_time:.2f}s)")
         print(f"Status: {'ÉXITO TOTAL' if vm_success else 'ÉXITO PARCIAL'}")

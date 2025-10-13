@@ -1,0 +1,310 @@
+{
+  "vms": [
+    {
+      "nombre": "vm1",
+      "flavor": "tiny",
+      "cpu": 1,
+      "memory": 512,
+      "disk": 1,
+      "usuario": "maria.garcia@email.com"
+    },
+    {
+      "nombre": "vm2",
+      "flavor": "small",
+      "cpu": 1,
+      "memory": 2048,
+      "disk": 20,
+      "usuario": "maria.garcia@email.com"
+    },
+    {
+      "nombre": "vm1",
+      "flavor": "small",
+      "cpu": 1,
+      "memory": 2048,
+      "disk": 20,
+      "usuario": "rodrigolujanf28@gmail.com",
+      "ip": "10.7.5.2",
+      "puerto_vnc": 5903
+    },
+    {
+      "nombre": "vm2",
+      "flavor": "small",
+      "cpu": 1,
+      "memory": 2048,
+      "disk": 20,
+      "usuario": "rodrigolujanf28@gmail.com",
+      "ip": "10.7.5.3",
+      "puerto_vnc": 5904
+    },
+    {
+      "nombre": "vm3",
+      "flavor": "small",
+      "cpu": 1,
+      "memory": 2048,
+      "disk": 20,
+      "usuario": "rodrigolujanf28@gmail.com",
+      "ip": "10.7.5.4",
+      "puerto_vnc": 5905
+    },
+    {
+      "nombre": "vm1",
+      "flavor": "tiny",
+      "cpu": 1,
+      "memory": 512,
+      "disk": 1,
+      "usuario": "rodrigolujanf28@gmail.com",
+      "ip": "10.7.6.2",
+      "puerto_vnc": 5906
+    },
+    {
+      "nombre": "vm2",
+      "flavor": "small",
+      "cpu": 1,
+      "memory": 2048,
+      "disk": 20,
+      "usuario": "rodrigolujanf28@gmail.com",
+      "ip": "10.7.6.3",
+      "puerto_vnc": 5907
+    },
+    {
+      "nombre": "vm3",
+      "flavor": "medium",
+      "cpu": 2,
+      "memory": 4096,
+      "disk": 40,
+      "usuario": "rodrigolujanf28@gmail.com",
+      "ip": "10.7.6.4",
+      "puerto_vnc": 5908
+    },
+    {
+      "nombre": "vm1",
+      "flavor": "tiny",
+      "cpu": 1,
+      "memory": 512,
+      "disk": 1,
+      "usuario": "rodrigolujanf28@gmail.com",
+      "ip": "10.7.6.2",
+      "puerto_vnc": 5909
+    },
+    {
+      "nombre": "vm2",
+      "flavor": "small",
+      "cpu": 1,
+      "memory": 2048,
+      "disk": 20,
+      "usuario": "rodrigolujanf28@gmail.com",
+      "ip": "10.7.6.3",
+      "puerto_vnc": 5910
+    },
+    {
+      "nombre": "vm3",
+      "flavor": "medium",
+      "cpu": 2,
+      "memory": 4096,
+      "disk": 40,
+      "usuario": "rodrigolujanf28@gmail.com",
+      "ip": "10.7.6.4",
+      "puerto_vnc": 5911
+    },
+    {
+      "nombre": "vm1",
+      "flavor": "tiny",
+      "cpu": 1,
+      "memory": 512,
+      "disk": 1,
+      "usuario": "rodrigolujanf28@gmail.com",
+      "ip": "10.7.7.2",
+      "puerto_vnc": 5912
+    },
+    {
+      "nombre": "vm2",
+      "flavor": "tiny",
+      "cpu": 1,
+      "memory": 512,
+      "disk": 1,
+      "usuario": "rodrigolujanf28@gmail.com",
+      "ip": "10.7.7.3",
+      "puerto_vnc": 5913
+    },
+    {
+      "nombre": "vm1",
+      "flavor": "tiny",
+      "cpu": 1,
+      "memory": 512,
+      "disk": 1,
+      "usuario": "maria.garcia@email.com",
+      "ip": "10.7.8.2",
+      "puerto_vnc": 5901
+    },
+    {
+      "nombre": "vm2",
+      "flavor": "tiny",
+      "cpu": 1,
+      "memory": 512,
+      "disk": 1,
+      "usuario": "maria.garcia@email.com",
+      "ip": "10.7.8.3",
+      "puerto_vnc": 5902
+    },
+    {
+      "nombre": "vm3",
+      "flavor": "small",
+      "cpu": 1,
+      "memory": 2048,
+      "disk": 20,
+      "usuario": "maria.garcia@email.com",
+      "ip": "10.7.8.4",
+      "puerto_vnc": 5903
+    },
+    {
+      "nombre": "vm4",
+      "flavor": "medium",
+      "cpu": 2,
+      "memory": 4096,
+      "disk": 40,
+      "usuario": "maria.garcia@email.com",
+      "ip": "10.7.8.5",
+      "puerto_vnc": 5904
+    },
+    {
+      "nombre": "vm5",
+      "flavor": "medium",
+      "cpu": 2,
+      "memory": 4096,
+      "disk": 40,
+      "usuario": "maria.garcia@email.com",
+      "ip": "10.7.8.6",
+      "puerto_vnc": 5905
+    },
+    {
+      "nombre": "vm6",
+      "flavor": "xlarge",
+      "cpu": 8,
+      "memory": 16384,
+      "disk": 160,
+      "usuario": "maria.garcia@email.com",
+      "ip": "10.7.8.7",
+      "puerto_vnc": 5906
+    },
+    {
+      "nombre": "vm1",
+      "flavor": "tiny",
+      "cpu": 1,
+      "memory": 512,
+      "disk": 1,
+      "usuario": "maria.garcia@email.com",
+      "ip": "10.7.9.2",
+      "puerto_vnc": 5901
+    },
+    {
+      "nombre": "vm2",
+      "flavor": "small",
+      "cpu": 1,
+      "memory": 2048,
+      "disk": 20,
+      "usuario": "maria.garcia@email.com",
+      "ip": "10.7.9.3",
+      "puerto_vnc": 5902
+    },
+    {
+      "nombre": "vm3",
+      "flavor": "tiny",
+      "cpu": 1,
+      "memory": 512,
+      "disk": 1,
+      "usuario": "maria.garcia@email.com",
+      "ip": "10.7.9.4",
+      "puerto_vnc": 5903
+    },
+    {
+      "nombre": "vm4",
+      "flavor": "small",
+      "cpu": 1,
+      "memory": 2048,
+      "disk": 20,
+      "usuario": "maria.garcia@email.com",
+      "ip": "10.7.9.5",
+      "puerto_vnc": 5904
+    },
+    {
+      "nombre": "vm5",
+      "flavor": "tiny",
+      "cpu": 1,
+      "memory": 512,
+      "disk": 1,
+      "usuario": "maria.garcia@email.com",
+      "ip": "10.7.9.6",
+      "puerto_vnc": 5905
+    },
+    {
+      "nombre": "vm1",
+      "flavor": "tiny",
+      "cpu": 1,
+      "memory": 512,
+      "disk": 1,
+      "usuario": "maria.garcia@email.com",
+      "ip": "10.7.10.2",
+      "puerto_vnc": 5901
+    },
+    {
+      "nombre": "vm2",
+      "flavor": "tiny",
+      "cpu": 1,
+      "memory": 512,
+      "disk": 1,
+      "usuario": "maria.garcia@email.com",
+      "ip": "10.7.10.3",
+      "puerto_vnc": 5902
+    },
+    {
+      "nombre": "vm3",
+      "flavor": "tiny",
+      "cpu": 1,
+      "memory": 512,
+      "disk": 1,
+      "usuario": "maria.garcia@email.com",
+      "ip": "10.7.10.4",
+      "puerto_vnc": 5903
+    },
+    {
+      "nombre": "vm4",
+      "flavor": "tiny",
+      "cpu": 1,
+      "memory": 512,
+      "disk": 1,
+      "usuario": "maria.garcia@email.com",
+      "ip": "10.7.10.5",
+      "puerto_vnc": 5904
+    },
+    {
+      "nombre": "vm5",
+      "flavor": "tiny",
+      "cpu": 1,
+      "memory": 512,
+      "disk": 1,
+      "usuario": "maria.garcia@email.com",
+      "ip": "10.7.10.6",
+      "puerto_vnc": 5905
+    },
+    {
+      "nombre": "vm1",
+      "flavor": "tiny",
+      "cpu": 1,
+      "memory": 512,
+      "disk": 1,
+      "usuario": "maria.garcia@email.com",
+      "ip": "10.7.11.2",
+      "puerto_vnc": 5901
+    },
+    {
+      "nombre": "vm2",
+      "flavor": "tiny",
+      "cpu": 1,
+      "memory": 512,
+      "disk": 1,
+      "usuario": "maria.garcia@email.com",
+      "ip": "10.7.11.3",
+      "puerto_vnc": 5902
+    }
+  ]
+}

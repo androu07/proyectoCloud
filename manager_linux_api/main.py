@@ -303,34 +303,72 @@ async def call_all_workers(endpoint: str, slice_id: int) -> Dict[str, Any]:
 
 async def run_cleanup_script(slice_id: int) -> Dict[str, Any]:
     """
-    Ejecutar limpieza local usando una llamada HTTP directa al host
+    Llamar a la Cleanup API en el host para ejecutar cleanup_slice.sh
     """
     try:
-        logger.info(f"Ejecutando limpieza local para slice {slice_id} via HTTP")
+        logger.info(f"Llamando a Cleanup API para slice {slice_id}")
         
-        # Hacer llamada HTTP directa al host para ejecutar el script
-        host_ip = "10.0.10.1"  # IP del host
-        url = f"http://{host_ip}:8000/cleanup_slice/{slice_id}"
+        # URL de la Cleanup API en el host
+        # El host está en la IP 10.0.10.1 desde la red del contenedor
+        cleanup_api_url = "http://10.0.10.1:8888/cleanup_slice"
         
-        # Si no hay endpoint específico, simulamos el resultado exitoso
-        # ya que la limpieza real la harán los workers
-        result = {
-            'success': True,
-            'return_code': 0,
-            'stdout': f'Limpieza local iniciada para slice {slice_id} - Workers harán el cleanup',
-            'stderr': '',
-            'command': f"HTTP cleanup request for slice {slice_id}"
+        headers = {
+            "Content-Type": "application/json"
         }
         
-        logger.info(f"✅ Limpieza local solicitada para slice {slice_id}")
-        return result
+        payload = {
+            "slice_id": slice_id,
+            "ovs_bridge": "br-cloud"
+        }
         
+        logger.info(f"POST {cleanup_api_url} - slice_id: {slice_id}")
+        
+        # Hacer la llamada HTTP a la Cleanup API
+        response = requests.post(
+            cleanup_api_url,
+            json=payload,
+            headers=headers,
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            success = result.get('success', False)
+            
+            if success:
+                logger.info(f"✅ Limpieza local exitosa para slice {slice_id}")
+            else:
+                logger.error(f"❌ Error en limpieza local para slice {slice_id}")
+            
+            return {
+                'success': success,
+                'return_code': result.get('return_code', -1),
+                'stdout': result.get('stdout', ''),
+                'stderr': result.get('stderr', ''),
+                'command': f"Cleanup API: cleanup_slice.sh {slice_id} br-cloud"
+            }
+        else:
+            error_msg = f"HTTP {response.status_code}: {response.text}"
+            logger.error(f"❌ Error llamando Cleanup API: {error_msg}")
+            return {
+                'success': False,
+                'error': error_msg,
+                'command': f"Cleanup API: cleanup_slice.sh {slice_id} br-cloud"
+            }
+        
+    except requests.exceptions.Timeout:
+        logger.error(f"❌ Timeout llamando Cleanup API para slice {slice_id}")
+        return {
+            'success': False,
+            'error': 'Timeout llamando Cleanup API',
+            'command': f"Cleanup API: cleanup_slice.sh {slice_id} br-cloud"
+        }
     except Exception as e:
-        logger.error(f"❌ Error en limpieza local: {str(e)}")
+        logger.error(f"❌ Excepción llamando Cleanup API: {str(e)}")
         return {
             'success': False,
             'error': str(e),
-            'command': f"HTTP cleanup request for slice {slice_id}"
+            'command': f"Cleanup API: cleanup_slice.sh {slice_id} br-cloud"
         }
 
 # ============================================================================

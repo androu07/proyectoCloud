@@ -243,12 +243,29 @@ services:
       - red_cloud
     restart: unless-stopped
 
+  # Base de datos MySQL para Slices
+  slices_db:
+    image: mysql:8.0
+    container_name: slices_database
+    environment:
+      MYSQL_ROOT_PASSWORD: slices_root_password_123
+      MYSQL_DATABASE: slices_db
+      MYSQL_USER: slices_user
+      MYSQL_PASSWORD: slices_password_123
+    volumes:
+      - slices_data:/var/lib/mysql
+      - ./mysql/init_slices.sql:/docker-entrypoint-initdb.d/init_slices.sql
+    networks:
+      - red_cloud
+    restart: unless-stopped
+
 networks:
   red_cloud:
     driver: bridge
 
 volumes:
   mysql_data:
+  slices_data:
   prometheus_data:
   grafana_data:
   traefik_letsencrypt:

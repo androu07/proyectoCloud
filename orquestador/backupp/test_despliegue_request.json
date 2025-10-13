@@ -1,0 +1,89 @@
+{
+  "json_config": {
+    "id_slice": "2",
+    "cantidad_vms": "7",
+    "vlans_separadas": "",
+    "vlans_usadas": "",
+    "vncs_separadas": "",
+    "conexion_topologias": "",
+    "topologias": [
+      {
+        "nombre": "lineal",
+        "cantidad_vms": "3",
+        "internet": "si",
+        "vms": [
+          {
+            "nombre": "vm1",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "acceso": "no",
+            "server": ""
+          },
+          {
+            "nombre": "vm2",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "acceso": "no",
+            "server": ""
+          },
+          {
+            "nombre": "vm3",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "acceso": "no",
+            "server": ""
+          }
+        ]
+      },
+      {
+        "nombre": "anillo",
+        "cantidad_vms": "4",
+        "internet": "si",
+        "vms": [
+          {
+            "nombre": "vm4",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "acceso": "no",
+            "server": ""
+          },
+          {
+            "nombre": "vm5",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "acceso": "si",
+            "server": ""
+          },
+          {
+            "nombre": "vm6",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "acceso": "no",
+            "server": ""
+          },
+          {
+            "nombre": "vm7",
+            "cores": "1",
+            "ram": "500M",
+            "almacenamiento": "1G",
+            "image": "cirros-0.5.1-x86_64-disk.img",
+            "acceso": "si",
+            "server": ""
+          }
+        ]
+      }
+    ]
+  }
+}

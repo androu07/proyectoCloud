@@ -1,0 +1,136 @@
+nohup: ignoring input
+INFO:     Will watch for changes in these directories: ['/home/ubuntu/red_contenedores/orquestador']
+INFO:     Uvicorn running on http://0.0.0.0:5807 (Press CTRL+C to quit)
+INFO:     Started reloader process [1392131] using StatReload
+🚀 Iniciando API del Orquestador...
+📍 Puerto: 5807
+🔗 URL: http://localhost:5807
+📚 Docs: http://localhost:5807/docs
+INFO:     Started server process [1392147]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:53856 - "GET /health HTTP/1.1" 200 OK
+Traceback (most recent call last):
+  File "/home/ubuntu/red_contenedores/orquestador/venv_api/lib/python3.12/site-packages/mysql/connector/network.py", line 600, in open_connection
+    self.sock.connect(sockaddr)
+ConnectionRefusedError: [Errno 111] Connection refused
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/ubuntu/red_contenedores/orquestador/orquestador_api.py", line 116, in update_slice_database
+    connection = mysql.connector.connect(**db_config)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/red_contenedores/orquestador/venv_api/lib/python3.12/site-packages/mysql/connector/pooling.py", line 294, in connect
+    return MySQLConnection(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/red_contenedores/orquestador/venv_api/lib/python3.12/site-packages/mysql/connector/connection.py", line 164, in __init__
+    self.connect(**kwargs)
+  File "/home/ubuntu/red_contenedores/orquestador/venv_api/lib/python3.12/site-packages/mysql/connector/abstracts.py", line 1181, in connect
+    self._open_connection()
+  File "/home/ubuntu/red_contenedores/orquestador/venv_api/lib/python3.12/site-packages/mysql/connector/connection.py", line 570, in _open_connection
+    self._socket.open_connection()
+  File "/home/ubuntu/red_contenedores/orquestador/venv_api/lib/python3.12/site-packages/mysql/connector/network.py", line 602, in open_connection
+    raise InterfaceError(
+mysql.connector.errors.InterfaceError: 2003: Can't connect to MySQL server on 'localhost:3307' (111 Connection refused)
+
+🎯 INICIANDO DESPLIEGUE COMPLETO DE SLICE
+📝 Slice ID: 13
+
+📋 PASO 1: Procesando configuración de topología...
+📂 Leyendo archivo de entrada: /tmp/tmp8zg0p6b6.json
+✅ Archivo cargado correctamente
+🔄 Pre-procesando JSON para completar campos faltantes...
+✅ Pre-procesamiento completado
+
+🏗️ Procesando 1 topología(s)...
+
+📐 Procesando topología 1: lineal
+   Enlaces generados: []
+   VM vm-test: VLANs 
+
+🖥️ Asignando puertos VNC...
+
+✅ Procesamiento completado
+VLANs utilizadas: 181;180
+
+💾 Archivo guardado: /tmp/tmpl2k90vzr.json
+✅ Topología procesada exitosamente (0.00s)
+   • 1 topologías
+   • 1 VMs
+   • VLANs usadas: 181;180
+
+🌐 PASO 2: Creando namespaces DHCP...
+
+🌐 Creando namespaces DHCP para slice 13
+VLANs: 181;180, Bridge: br-cloud
+   🚀 Ejecutando net_create.sh para rango completo 181;180...
+   📋 Salida del comando: ERROR: El VLAN inicial no puede ser mayor que el final
+[sudo] password for ubuntu:
+   ✅ net_create.sh ejecutado para 0 VLANs
+   ⏳ Esperando que net_create.sh complete el setup...
+✅ Namespaces DHCP creados exitosamente (5.13s)
+   • 0 VLANs configuradas
+
+🚀 PASO 3: Desplegando VMs en workers...
+
+🚀 Desplegando VMs para slice 13
+
+📐 Desplegando topología: lineal
+   Desplegando vm-test en worker1...
+   ❌ Error desplegando vm-test: Error desplegando VM vm-test: {"detail":"Formato de VLANs inválido"}
+🏁 Despliegue VMs completado (0.06s)
+   • 0 VMs desplegadas exitosamente
+   • 1 VMs fallidas
+
+🔍 PASO 4: Verificación final del despliegue...
+
+🔍 VERIFICACIÓN FINAL del slice 13
+📋 Listando namespaces...
+   Namespaces encontrados: []
+📋 Listando procesos dnsmasq...
+📋 Listando puertos OVS...
+
+📊 Resumen verificación:
+   • Namespaces: 0/0
+   • Procesos dnsmasq: 0
+   • Puertos OVS: 0
+✅ Verificación exitosa - Infraestructura DHCP operativa
+✅ Verificación final exitosa (0.17s)
+
+🎉 DESPLIEGUE COMPLETADO (5.37s)
+Status: ÉXITO PARCIAL
+Mensaje: Slice 13 desplegado y verificado exitosamente - 0/1 VMs
+📝 Actualizando base de datos para slice 13...
+❌ Error actualizando base de datos para slice 13: 2003: Can't connect to MySQL server on 'localhost:3307' (111 Connection refused)
+⚠️ Warning: No se pudo actualizar la BD para slice 13
+INFO:     172.18.0.4:34596 - "POST /desplegar-slice HTTP/1.1" 200 OK
+WARNING:  StatReload detected changes in 'orquestador_api.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [1392147]
+INFO:     Started server process [1393063]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'orquestador_api.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [1393063]
+INFO:     Started server process [1393078]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'orquestador_api.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [1393078]
+INFO:     Started server process [1393087]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [1393087]
+INFO:     Stopping reloader process [1392131]

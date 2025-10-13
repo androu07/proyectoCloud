@@ -102,6 +102,7 @@ services:
       - "worker1:10.0.10.2"
       - "worker2:10.0.10.3"
       - "worker3:10.0.10.4"
+      - "host:10.0.10.1"
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.slice-manager-api.rule=PathPrefix(`/slices`)"
@@ -110,6 +111,33 @@ services:
       - "traefik.http.services.slice-manager-api.loadbalancer.server.port=5900"
       - "traefik.http.middlewares.slice-manager-strip.stripprefix.prefixes=/slices"
       - "traefik.http.routers.slice-manager-api.middlewares=slice-manager-strip"
+    restart: unless-stopped
+
+  # API de Gestión Linux - Manager Linux  
+  manager_linux_api:
+    build:
+      context: ./manager_linux_api
+      dockerfile: Dockerfile
+    container_name: manager_linux
+    environment:
+      - JWT_SECRET_KEY=mi_clave_secreta_super_segura_12345
+    volumes:
+      - /home/ubuntu/red_contenedores/orquestador/backupp:/scripts:ro
+    networks:
+      - red_cloud
+    extra_hosts:
+      - "worker1:10.0.10.2"
+      - "worker2:10.0.10.3"
+      - "worker3:10.0.10.4"
+      - "host:10.0.10.1"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.manager-linux-api.rule=PathPrefix(`/manager`)"
+      - "traefik.http.routers.manager-linux-api.entrypoints=websecure"
+      - "traefik.http.routers.manager-linux-api.tls.certresolver=myresolver"
+      - "traefik.http.services.manager-linux-api.loadbalancer.server.port=5950"
+      - "traefik.http.middlewares.manager-linux-strip.stripprefix.prefixes=/manager"
+      - "traefik.http.routers.manager-linux-api.middlewares=manager-linux-strip"
     restart: unless-stopped
 
   # ========== SERVICIOS DE MONITOREO ==========

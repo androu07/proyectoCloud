@@ -3,8 +3,9 @@
 set -e  # Exit on any error
 
 # Parámetros
-VLAN_ID="$1"
-BASE_SUBNET="10.7"
+ID="$1"
+VLAN_ID="$2"
+BASE_SUBNET="10.1"
 
 # Verificar que se ejecuta como root
 if [[ $EUID -ne 0 ]]; then
@@ -14,7 +15,7 @@ fi
 
 # Configuración de red
 SUBNET="${BASE_SUBNET}.${VLAN_ID}.0/24"
-OVS_INTERNAL_IFACE="id${VLAN_ID}-gw"
+OVS_INTERNAL_IFACE="id${ID}-gw${VLAN_ID}"
 
 # Detectar interfaz de Internet (la que tiene ruta por defecto)
 INTERNET_IFACE=$(ip route | grep default | head -1 | awk '{print $5}')

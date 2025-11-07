@@ -19,7 +19,7 @@ app = FastAPI(title="API de Autenticación", version="1.0.0")
 DB_CONFIG = {
     'host': os.getenv('DB_HOST', 'localhost'),
     'port': int(os.getenv('DB_PORT', 3306)),
-    'database': os.getenv('DB_NAME', 'usuarios_de_red'),
+    'database': os.getenv('DB_NAME', 'usuarios_db'),
     'user': os.getenv('DB_USER', 'app_user'),
     'password': os.getenv('DB_PASSWORD', 'app_password123')
 }

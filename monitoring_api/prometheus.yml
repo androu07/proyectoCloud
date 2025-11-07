@@ -1,0 +1,52 @@
+  global:
+    scrape_interval: 15s
+    evaluation_interval: 15s
+
+  rule_files:
+    # - "first_rules.yml"
+    # - "second_rules.yml"
+
+  scrape_configs:
+    # Prometheus
+    - job_name: 'prometheus'
+      static_configs:
+        - targets: ['localhost:9090']
+      metrics_path: '/prometheus/metrics'
+
+    # Métricas del app node
+    - job_name: 'app-node'
+      static_configs:
+        - targets: ['10.20.12.169:9100']
+          labels:
+            nombre: 'APP'
+      scrape_interval: 15s
+
+    # Métricas de los headnodes
+    - job_name: 'headnodes'
+      static_configs:
+        - targets: ['192.168.203.1:9100']
+          labels:
+            nombre: 'Headnode-linux'
+      scrape_interval: 15s
+
+    # Métricas de los worker nodes
+    - job_name: 'worker-nodes'
+      static_configs:
+        - targets: ['192.168.203.2:9100']
+          labels:
+            nombre: 'Worker-1'
+            
+        - targets: ['192.168.203.3:9100']
+          labels:
+            nombre: 'Worker-2'
+            
+        - targets: ['192.168.203.4:9100']
+          labels:
+            nombre: 'Worker-3'
+      scrape_interval: 15s
+    
+    # Métricas de contenedores Docker
+    - job_name: 'docker_network'
+      static_configs:
+        - targets: ['monitoring_docker_network:8080']
+      scrape_interval: 15s

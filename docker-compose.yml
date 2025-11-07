@@ -2,7 +2,7 @@ services:
   # ========== API GATEWAY ==========
   api_gateway:
     image: traefik:v3.0
-    container_name: api_gateway_service
+    container_name: api_gateway
     command:
       - "--api.insecure=true"
       - "--providers.docker=true"
@@ -12,7 +12,7 @@ services:
       - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
       - "--certificatesresolvers.myresolver.acme.email=andres.lujanf@pucp.edu.pe"
       - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
-      - "--certificatesresolvers.myresolver.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory"
+      - "--certificatesresolvers.myresolver.acme.caserver=https://acme-v02.api.letsencrypt.org/directory"
       - "--log.level=INFO"
       - "--log.format=json"
       - "--accesslog=true"
@@ -42,16 +42,16 @@ services:
     build:
       context: ./auth_api
       dockerfile: Dockerfile
-    container_name: auth_service
+    container_name: auth_api
     environment:
-      - DB_HOST=mysql_db
+      - DB_HOST=usuarios_db
       - DB_PORT=3306
-      - DB_NAME=usuarios_de_red
+      - DB_NAME=usuarios_db
       - DB_USER=app_user
       - DB_PASSWORD=app_password123
       - JWT_SECRET_KEY=mi_clave_secreta_super_segura_12345
     depends_on:
-      - mysql_db
+      - usuarios_db
     networks:
       - red_cloud
     labels:
@@ -63,110 +63,33 @@ services:
       - "traefik.http.middlewares.auth-strip.stripprefix.prefixes=/auth"
       - "traefik.http.routers.auth-api.middlewares=auth-strip"
     restart: unless-stopped
-
-  # API de Credenciales de Grafana - Monitoreo
+  
+  # API de Monitoreo de métricas
   monitoring_api:
-    build:
-      context: ./grafana_credentials_api
-      dockerfile: Dockerfile
-    container_name: monitoring_service
-    environment:
-      - JWT_SECRET_KEY=mi_clave_secreta_super_segura_12345
-      - SMTP_SERVER=smtp.gmail.com
-      - SMTP_PORT=587
-      - SMTP_USERNAME=hanckonunez@gmail.com
-      - SMTP_PASSWORD=alys dsys fwab fkal
-    networks:
-      - red_cloud
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.monitoring-api.rule=PathPrefix(`/monitoring`)"
-      - "traefik.http.routers.monitoring-api.entrypoints=websecure"
-      - "traefik.http.routers.monitoring-api.tls.certresolver=myresolver"
-      - "traefik.http.services.monitoring-api.loadbalancer.server.port=5800"
-      - "traefik.http.middlewares.monitoring-strip.stripprefix.prefixes=/monitoring"
-      - "traefik.http.routers.monitoring-api.middlewares=monitoring-strip"
-    restart: unless-stopped
-
-  # API de Gestión de Slices - Slice Manager
-  slice_manager_api:
-    build:
-      context: ./slice_manager_api
-      dockerfile: Dockerfile
-    container_name: slice_manager
-    environment:
-      - JWT_SECRET_KEY=mi_clave_secreta_super_segura_12345
-    networks:
-      - red_cloud
-    extra_hosts:
-      - "worker1:10.0.10.2"
-      - "worker2:10.0.10.3"
-      - "worker3:10.0.10.4"
-      - "host:10.0.10.1"
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.slice-manager-api.rule=PathPrefix(`/slices`)"
-      - "traefik.http.routers.slice-manager-api.entrypoints=websecure"
-      - "traefik.http.routers.slice-manager-api.tls.certresolver=myresolver"
-      - "traefik.http.services.slice-manager-api.loadbalancer.server.port=5900"
-      - "traefik.http.middlewares.slice-manager-strip.stripprefix.prefixes=/slices"
-      - "traefik.http.routers.slice-manager-api.middlewares=slice-manager-strip"
-    restart: unless-stopped
-
-  # API de Gestión Linux - Manager Linux  
-  manager_linux_api:
-    build:
-      context: ./manager_linux_api
-      dockerfile: Dockerfile
-    container_name: manager_linux
-    environment:
-      - JWT_SECRET_KEY=mi_clave_secreta_super_segura_12345
-    volumes:
-      - /home/ubuntu/red_contenedores/orquestador/backupp:/scripts:ro
-      - /var/run/netns:/var/run/netns:shared
-      - /run/openvswitch:/run/openvswitch:rw
-    networks:
-      - red_cloud
-    extra_hosts:
-      - "worker1:10.0.10.2"
-      - "worker2:10.0.10.3"
-      - "worker3:10.0.10.4"
-      - "host:10.0.10.1"
-    cap_add:
-      - NET_ADMIN
-      - SYS_ADMIN
-    privileged: true
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.manager-linux-api.rule=PathPrefix(`/manager`)"
-      - "traefik.http.routers.manager-linux-api.entrypoints=websecure"
-      - "traefik.http.routers.manager-linux-api.tls.certresolver=myresolver"
-      - "traefik.http.services.manager-linux-api.loadbalancer.server.port=5950"
-      - "traefik.http.middlewares.manager-linux-strip.stripprefix.prefixes=/manager"
-      - "traefik.http.routers.manager-linux-api.middlewares=manager-linux-strip"
-    restart: unless-stopped
-
-  # ========== SERVICIOS DE MONITOREO ==========
-  # Prometheus - Recolección de métricas
-  prometheus:
     image: prom/prometheus:latest
-    container_name: prometheus_service
+    container_name: monitoring_api
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
+      - ./monitoring_api/prometheus.yml:/etc/prometheus/prometheus.yml
+      - metrics_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
       - '--web.console.libraries=/etc/prometheus/console_libraries'
       - '--web.console.templates=/etc/prometheus/consoles'
       - '--storage.tsdb.retention.time=7d'
-      - '--storage.tsdb.retention.size=1GB'
+      - '--storage.tsdb.retention.size=2GB'
       - '--web.enable-lifecycle'
       - '--web.enable-admin-api'
       - '--web.external-url=http://localhost/prometheus/'
       - '--web.route-prefix=/prometheus/'
     networks:
       - red_cloud
+    extra_hosts:
+      - "app:10.20.12.169"
+      - "head-linux:192.168.203.1"
+      - "worker1:192.168.203.2"
+      - "worker2:192.168.203.3"
+      - "worker3:192.168.203.4"
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
@@ -174,12 +97,127 @@ services:
       - "traefik.http.routers.prometheus.entrypoints=websecure"
       - "traefik.http.routers.prometheus.tls.certresolver=myresolver"
       - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
+  
+  # API de Dashboard de métricas y logs
+  dashboards_api:
+    image: grafana/grafana:latest
+    container_name: dashboards_api
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./dashboards/provisioning/datasources:/etc/grafana/provisioning/datasources
+      - ./dashboards/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=https://localhost/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+    networks:
+      - red_cloud
+    restart: unless-stopped
+    depends_on:
+      - monitoring_api
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=PathPrefix(`/grafana`)"
+      - "traefik.http.routers.grafana.entrypoints=websecure"
+      - "traefik.http.routers.grafana.tls.certresolver=myresolver"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
 
-      
+  # API Gestor de Imágenes
+  image_manager_api:
+    build:
+      context: ./image_manager_api
+      dockerfile: Dockerfile
+    container_name: image_manager_api
+    environment:
+      - JWT_SECRET_KEY=mi_clave_secreta_super_segura_12345
+      - IMAGES_DIR=/var/lib/images
+      - DB_HOST=imagenes_db
+      - DB_PORT=3306
+      - DB_NAME=imagenes_db
+      - DB_USER=images_user
+      - DB_PASSWORD=images_pass123
+    volumes:
+      - images_data:/var/lib/images
+    networks:
+      - red_cloud
+    depends_on:
+      - imagenes_db
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.image-manager.rule=PathPrefix(`/images`)"
+      - "traefik.http.routers.image-manager.entrypoints=websecure"
+      - "traefik.http.routers.image-manager.tls.certresolver=myresolver"
+      - "traefik.http.services.image-manager.loadbalancer.server.port=5700"
+      - "traefik.http.middlewares.image-manager-strip.stripprefix.prefixes=/images"
+      - "traefik.http.routers.image-manager.middlewares=image-manager-strip"
+    restart: unless-stopped
+
+  # # API de Gestión de Slices
+  # slice_manager_api:
+  #   build:
+  #     context: ./slice_manager_api
+  #     dockerfile: Dockerfile
+  #   container_name: slice_manager
+  #   environment:
+  #     - JWT_SECRET_KEY=mi_clave_secreta_super_segura_12345
+  #   networks:
+  #     - red_cloud
+  #   extra_hosts:
+  #     - "worker1:10.0.10.2"
+  #     - "worker2:10.0.10.3"
+  #     - "worker3:10.0.10.4"
+  #     - "host:10.0.10.1"
+  #   labels:
+  #     - "traefik.enable=true"
+  #     - "traefik.http.routers.slice-manager-api.rule=PathPrefix(`/slices`)"
+  #     - "traefik.http.routers.slice-manager-api.entrypoints=websecure"
+  #     - "traefik.http.routers.slice-manager-api.tls.certresolver=myresolver"
+  #     - "traefik.http.services.slice-manager-api.loadbalancer.server.port=5900"
+  #     - "traefik.http.middlewares.slice-manager-strip.stripprefix.prefixes=/slices"
+  #     - "traefik.http.routers.slice-manager-api.middlewares=slice-manager-strip"
+  #   restart: unless-stopped
+
+  # # API de Gestión Linux - Manager Linux  
+  # manager_linux_api:
+  #   build:
+  #     context: ./manager_linux_api
+  #     dockerfile: Dockerfile
+  #   container_name: manager_linux
+  #   environment:
+  #     - JWT_SECRET_KEY=mi_clave_secreta_super_segura_12345
+  #   volumes:
+  #     - /home/ubuntu/red_contenedores/orquestador/backupp:/scripts:ro
+  #     - /var/run/netns:/var/run/netns:shared
+  #     - /run/openvswitch:/run/openvswitch:rw
+  #   networks:
+  #     - red_cloud
+  #   extra_hosts:
+  #     - "worker1:10.0.10.2"
+  #     - "worker2:10.0.10.3"
+  #     - "worker3:10.0.10.4"
+  #     - "host:10.0.10.1"
+  #   cap_add:
+  #     - NET_ADMIN
+  #     - SYS_ADMIN
+  #   privileged: true
+  #   labels:
+  #     - "traefik.enable=true"
+  #     - "traefik.http.routers.manager-linux-api.rule=PathPrefix(`/manager`)"
+  #     - "traefik.http.routers.manager-linux-api.entrypoints=websecure"
+  #     - "traefik.http.routers.manager-linux-api.tls.certresolver=myresolver"
+  #     - "traefik.http.services.manager-linux-api.loadbalancer.server.port=5950"
+  #     - "traefik.http.middlewares.manager-linux-strip.stripprefix.prefixes=/manager"
+  #     - "traefik.http.routers.manager-linux-api.middlewares=manager-linux-strip"
+  #   restart: unless-stopped
+
+  # ========== CONTENEDORES COMPLEMENTARIOS A LAS APIS ==========
+
   # cAdvisor - Métricas de la red de contenedores
-  cadvisor:
+  monitoring_docker_network:
     image: gcr.io/cadvisor/cadvisor:latest
-    container_name: cadvisor_service
+    container_name: monitoring_docker_network
     ports:
       - "8081:8080"
     volumes:
@@ -194,60 +232,15 @@ services:
     networks:
       - red_cloud
     restart: unless-stopped
-
-  # Grafana - Visualización de métricas
-  grafana:
-    image: grafana/grafana:latest
-    container_name: grafana_service
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
-      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
-    environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin123
-      - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SERVER_ROOT_URL=https://localhost/grafana/
-      - GF_SERVER_SERVE_FROM_SUB_PATH=true
-    networks:
-      - red_cloud
-    restart: unless-stopped
-    depends_on:
-      - prometheus
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.grafana.rule=PathPrefix(`/grafana`)"
-      - "traefik.http.routers.grafana.entrypoints=websecure"
-      - "traefik.http.routers.grafana.tls.certresolver=myresolver"
-      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
-
-  # ========== SERVICIOS DE LOGS ==========
-  # Promtail - Recolector de logs
-  promtail:
-    image: grafana/promtail:2.9.0
-    container_name: promtail_service
-    volumes:
-      - ./promtail:/etc/promtail
-      - traefik_logs:/var/log/traefik:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - /var/run/docker.sock:/var/run/docker.sock
-    command: -config.file=/etc/promtail/promtail-config.yml
-    networks:
-      - red_cloud
-    restart: unless-stopped
-    depends_on:
-      - loki
   
   # Loki - Almacenamiento de logs
   loki:
     image: grafana/loki:2.9.0
-    container_name: loki_service
-    ports:
-      - "3100:3100"
+    container_name: loki
     volumes:
       - loki_data:/loki
-      - ./loki:/etc/loki
-    command: -config.file=/etc/loki/loki-config.yml
+      - ./logs/loki/loki-config.yml:/etc/loki/local-config.yaml
+    command: -config.file=/etc/loki/local-config.yaml
     networks:
       - red_cloud
     restart: unless-stopped
@@ -257,51 +250,82 @@ services:
       - "traefik.http.routers.loki.entrypoints=websecure"
       - "traefik.http.routers.loki.tls.certresolver=myresolver"
       - "traefik.http.services.loki.loadbalancer.server.port=3100"
-      - "traefik.http.middlewares.loki-strip.stripprefix.prefixes=/loki"
-      - "traefik.http.routers.loki.middlewares=loki-strip"
+
+  # Promtail - Recolector de logs
+  promtail:
+    image: grafana/promtail:2.9.0
+    container_name: promtail
+    volumes:
+      - ./logs/promtail:/etc/promtail
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: -config.file=/etc/promtail/promtail-config.yml
+    networks:
+      - red_cloud
+    restart: unless-stopped
+    depends_on:
+      - loki
 
   # ========== CONTENEDORES BASE DE DATOS ==========
-  # Base de datos MySQL
-  mysql_db:
+  # Base de datos de usuarios
+  usuarios_db:
     image: mysql:8.0
-    container_name: usuarios_de_red_db
+    container_name: usuarios_db
     environment:
-      MYSQL_ROOT_PASSWORD: rootpassword123
-      MYSQL_DATABASE: usuarios_de_red
-      MYSQL_USER: app_user
-      MYSQL_PASSWORD: app_password123
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: usuarios_db
+      MYSQL_USER: admin
+      MYSQL_PASSWORD: admin123
     volumes:
-      - mysql_data:/var/lib/mysql
-      - ./mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - users_data:/var/lib/mysql
+      - ./databases/init_usuarios.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - red_cloud
     restart: unless-stopped
 
-  # Base de datos MySQL para Slices
-  slices_db:
+  # Base de datos de imágenes
+  imagenes_db:
     image: mysql:8.0
-    container_name: slices_database
+    container_name: imagenes_db
     environment:
-      MYSQL_ROOT_PASSWORD: slices_root_password_123
-      MYSQL_DATABASE: slices_db
-      MYSQL_USER: slices_user
-      MYSQL_PASSWORD: slices_password_123
+      MYSQL_ROOT_PASSWORD: imagenes_root_pass
+      MYSQL_DATABASE: imagenes_db
+      MYSQL_USER: images_user
+      MYSQL_PASSWORD: images_pass123
     volumes:
-      - slices_data:/var/lib/mysql
-      - ./mysql/init_slices.sql:/docker-entrypoint-initdb.d/init_slices.sql
+      - images_db_data:/var/lib/mysql
+      - ./databases/init_imagenes.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - red_cloud
     restart: unless-stopped
+
+  # Base de datos de slices
+  # slices_db:
+  #   image: mysql:8.0
+  #   container_name: slices_database
+  #   environment:
+  #     MYSQL_ROOT_PASSWORD: slices_root_password_123
+  #     MYSQL_DATABASE: slices_db
+  #     MYSQL_USER: slices_user
+  #     MYSQL_PASSWORD: slices_password_123
+  #   volumes:
+  #     - slices_data:/var/lib/mysql
+  #     - ./mysql/init_slices.sql:/docker-entrypoint-initdb.d/init_slices.sql
+  #   networks:
+  #     - red_cloud
+  #   restart: unless-stopped
 
 networks:
   red_cloud:
     driver: bridge
 
 volumes:
-  mysql_data:
+  users_data:
   slices_data:
-  prometheus_data:
+  metrics_data:
   grafana_data:
+  images_data:
+  images_db_data:
   traefik_letsencrypt:
   traefik_logs:
   loki_data:

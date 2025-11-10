@@ -1,18 +1,15 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
-# Copiar requirements primero para aprovechar cache de Docker
+# Copiar requirements
 COPY requirements.txt .
-
-# Instalar dependencias
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar el código de la aplicación
+# Copiar código
 COPY main.py .
 
-# Exponer el puerto
 EXPOSE 5900
 
-# Comando para ejecutar la aplicación
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "5900"]
+# Usar 2 workers
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "5900", "--workers", "2"]

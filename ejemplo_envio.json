@@ -1,0 +1,92 @@
+{
+    "nombre_slice": "ejemplo",
+    "zona_despliegue": "linux",
+    "solicitud_json": {
+        "id_slice": "",
+        "cantidad_vms": "3",
+        "vlans_separadas": "",
+        "vlans_usadas": "",
+        "vncs_separadas": "",
+        "conexion_topologias": "vm3-vm4",
+        "topologias": [
+            {
+                "nombre": "lineal",
+                "cantidad_vms": "3",
+                "vms": [
+                    {
+                        "nombre": "vm1",
+                        "cores": "1",
+                        "ram": "512M",
+                        "almacenamiento": "1G",
+                        "puerto_vnc": "",
+                        "image": "cirros",
+                        "conexiones_vlans": "",
+                        "internet": "no",
+                        "server": ""
+                    },
+                    {
+                        "nombre": "vm2",
+                        "cores": "1",
+                        "ram": "512M",
+                        "almacenamiento": "1G",
+                        "puerto_vnc": "",
+                        "image": "cirros",
+                        "conexiones_vlans": "",
+                        "internet": "no",
+                        "server": ""
+                    },
+                    {
+                        "nombre": "vm3",
+                        "cores": "1",
+                        "ram": "512M",
+                        "almacenamiento": "1G",
+                        "puerto_vnc": "",
+                        "image": "cirros",
+                        "conexiones_vlans": "",
+                        "internet": "no",
+                        "server": ""
+                    }
+                ]
+            },
+            {
+                "nombre": "anillo",
+                "cantidad_vms": "3",
+                "vms": [
+                    {
+                        "nombre": "vm4",
+                        "cores": "1",
+                        "ram": "512M",
+                        "almacenamiento": "1G",
+                        "puerto_vnc": "",
+                        "image": "cirros",
+                        "conexiones_vlans": "",
+                        "internet": "no",
+                        "server": ""
+                    },
+                    {
+                        "nombre": "vm5",
+                        "cores": "1",
+                        "ram": "512M",
+                        "almacenamiento": "1G",
+                        "puerto_vnc": "",
+                        "image": "cirros",
+                        "conexiones_vlans": "",
+                        "internet": "no",
+                        "server": ""
+                    },
+                    {
+                        "nombre": "vm6",
+                        "cores": "1",
+                        "ram": "512M",
+                        "almacenamiento": "1G",
+                        "puerto_vnc": "",
+                        "image": "cirros",
+                        "conexiones_vlans": "",
+                        "internet": "no",
+                        "server": ""
+                    }
+                ]
+            }
+        ]
+    }
+}

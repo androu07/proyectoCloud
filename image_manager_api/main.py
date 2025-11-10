@@ -24,7 +24,7 @@ app = FastAPI(
 JWT_SECRET = os.getenv('JWT_SECRET_KEY', 'mi_clave_secreta_super_segura_12345')
 JWT_ALGORITHM = 'HS256'
 IMAGES_DIR = os.getenv('IMAGES_DIR', '/var/lib/images')
-MAX_IMAGE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB en bytes
+MAX_IMAGE_SIZE = 1 * 1024 * 1024 * 1024  # 2GB en bytes
 DOWNLOAD_TOKEN = os.getenv('DOWNLOAD_TOKEN', 'clavesihna')  # Token para descarga entre servicios
 
 # Configuración de BD
@@ -33,7 +33,8 @@ DB_CONFIG = {
     'port': int(os.getenv('DB_PORT', 3306)),
     'database': os.getenv('DB_NAME', 'imagenes_db'),
     'user': os.getenv('DB_USER', 'images_user'),
-    'password': os.getenv('DB_PASSWORD', 'images_pass123')
+    'password': os.getenv('DB_PASSWORD', 'images_pass123'),
+    'max_allowed_packet': 1073741824  # 1GB
 }
 
 # Thread pool para operaciones bloqueantes
@@ -56,28 +57,15 @@ class ImageResponse(BaseModel):
     size_gb: float = None
     formato: str = None
 
-# Verificar JWT
-def verify_jwt_token(token: str) -> dict:
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        return payload
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expirado")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
-
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
-    return verify_jwt_token(credentials.credentials)
-
-# Verificar token de descarga (para comunicación entre servicios)
-def verify_download_token(token: str) -> bool:
+# Verificar token de servicio (para todos los endpoints)
+def verify_service_token(token: str) -> bool:
     return token == DOWNLOAD_TOKEN
 
-async def get_download_auth(credentials: HTTPAuthorizationCredentials = Depends(security)) -> bool:
-    if not verify_download_token(credentials.credentials):
+async def get_service_auth(credentials: HTTPAuthorizationCredentials = Depends(security)) -> bool:
+    if not verify_service_token(credentials.credentials):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token de descarga inválido"
+            detail="Token de servicio inválido"
         )
     return True
 
@@ -634,7 +622,7 @@ async def health_check():
 @app.post("/import-image", response_model=ImageResponse)
 async def import_image_by_url(
     request: ImageUrlRequest,
-    current_user: dict = Depends(get_current_user)
+    authorized: bool = Depends(get_service_auth)
 ):
     """
     Importar imagen desde URL con validaciones:
@@ -671,7 +659,7 @@ async def import_image_by_url(
 async def upload_image_file(
     nombre: str = Form(...),
     file: UploadFile = File(...),
-    current_user: dict = Depends(get_current_user)
+    authorized: bool = Depends(get_service_auth)
 ):
     """
     Subir imagen como archivo con validaciones:
@@ -705,7 +693,7 @@ async def upload_image_file(
         )
 
 @app.get("/list-images")
-async def list_images(current_user: dict = Depends(get_current_user)):
+async def list_images(authorized: bool = Depends(get_service_auth)):
     """
     Listar todas las imágenes almacenadas en la base de datos
     """
@@ -741,7 +729,7 @@ async def list_images(current_user: dict = Depends(get_current_user)):
 @app.delete("/delete-image/{image_id}")
 async def delete_image(
     image_id: int,
-    current_user: dict = Depends(get_current_user)
+    authorized: bool = Depends(get_service_auth)
 ):
     """
     Eliminar una imagen del catálogo por su ID
@@ -786,7 +774,7 @@ async def delete_image(
 @app.get("/download")
 async def download_image(
     nombre: str,
-    authorized: bool = Depends(get_download_auth)
+    authorized: bool = Depends(get_service_auth)
 ):
     """
     Descargar imagen por nombre (requiere token 'clavesihna')

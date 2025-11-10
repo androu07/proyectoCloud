@@ -154,65 +154,101 @@ services:
       - "traefik.http.routers.image-manager.middlewares=image-manager-strip"
     restart: unless-stopped
 
-  # # API de Gestión de Slices
-  # slice_manager_api:
-  #   build:
-  #     context: ./slice_manager_api
-  #     dockerfile: Dockerfile
-  #   container_name: slice_manager
-  #   environment:
-  #     - JWT_SECRET_KEY=mi_clave_secreta_super_segura_12345
-  #   networks:
-  #     - red_cloud
-  #   extra_hosts:
-  #     - "worker1:10.0.10.2"
-  #     - "worker2:10.0.10.3"
-  #     - "worker3:10.0.10.4"
-  #     - "host:10.0.10.1"
-  #   labels:
-  #     - "traefik.enable=true"
-  #     - "traefik.http.routers.slice-manager-api.rule=PathPrefix(`/slices`)"
-  #     - "traefik.http.routers.slice-manager-api.entrypoints=websecure"
-  #     - "traefik.http.routers.slice-manager-api.tls.certresolver=myresolver"
-  #     - "traefik.http.services.slice-manager-api.loadbalancer.server.port=5900"
-  #     - "traefik.http.middlewares.slice-manager-strip.stripprefix.prefixes=/slices"
-  #     - "traefik.http.routers.slice-manager-api.middlewares=slice-manager-strip"
-  #   restart: unless-stopped
+  # API Slice Manager
+  slice_manager_api:
+    build:
+      context: ./slice_manager_api
+      dockerfile: Dockerfile
+    container_name: slice_manager_api
+    environment:
+      - JWT_SECRET_KEY=mi_clave_secreta_super_segura_12345
+      - IMAGE_MANAGER_URL=http://image_manager_api:5700
+      - IMAGE_MANAGER_TOKEN=clavesihna
+      - QUEUE_MANAGER_URL=http://queue_manager:6100
+      - DRIVERS_URL=http://drivers:6200
+      - DB_HOST=slices_db
+      - DB_PORT=3306
+      - DB_NAME=slices_db
+      - DB_USER=slices_user
+      - DB_PASSWORD=slices_pass123
+    networks:
+      - red_cloud
+    depends_on:
+      - image_manager_api
+      - slices_db
+      - queue_manager
+      - drivers
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.slice-manager.rule=PathPrefix(`/app`)"
+      - "traefik.http.routers.slice-manager.entrypoints=websecure"
+      - "traefik.http.routers.slice-manager.tls.certresolver=myresolver"
+      - "traefik.http.services.slice-manager.loadbalancer.server.port=5900"
+      - "traefik.http.middlewares.slice-manager-strip.stripprefix.prefixes=/app"
+      - "traefik.http.routers.slice-manager.middlewares=slice-manager-strip"
+    restart: unless-stopped
 
-  # # API de Gestión Linux - Manager Linux  
-  # manager_linux_api:
-  #   build:
-  #     context: ./manager_linux_api
-  #     dockerfile: Dockerfile
-  #   container_name: manager_linux
-  #   environment:
-  #     - JWT_SECRET_KEY=mi_clave_secreta_super_segura_12345
-  #   volumes:
-  #     - /home/ubuntu/red_contenedores/orquestador/backupp:/scripts:ro
-  #     - /var/run/netns:/var/run/netns:shared
-  #     - /run/openvswitch:/run/openvswitch:rw
-  #   networks:
-  #     - red_cloud
-  #   extra_hosts:
-  #     - "worker1:10.0.10.2"
-  #     - "worker2:10.0.10.3"
-  #     - "worker3:10.0.10.4"
-  #     - "host:10.0.10.1"
-  #   cap_add:
-  #     - NET_ADMIN
-  #     - SYS_ADMIN
-  #   privileged: true
-  #   labels:
-  #     - "traefik.enable=true"
-  #     - "traefik.http.routers.manager-linux-api.rule=PathPrefix(`/manager`)"
-  #     - "traefik.http.routers.manager-linux-api.entrypoints=websecure"
-  #     - "traefik.http.routers.manager-linux-api.tls.certresolver=myresolver"
-  #     - "traefik.http.services.manager-linux-api.loadbalancer.server.port=5950"
-  #     - "traefik.http.middlewares.manager-linux-strip.stripprefix.prefixes=/manager"
-  #     - "traefik.http.routers.manager-linux-api.middlewares=manager-linux-strip"
-  #   restart: unless-stopped
+  # Queue Manager - Gestor de colas
+  queue_manager:
+    build:
+      context: ./queue_manager
+      dockerfile: Dockerfile
+    container_name: queue_manager
+    environment:
+      - SERVICE_TOKEN=clavesihna
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=guest
+      - RABBITMQ_PASS=guest
+      - VM_PLACEMENT_URL=http://vm_placement_api:6000
+    networks:
+      - red_cloud
+    depends_on:
+      - rabbitmq
+      - vm_placement_api
+    restart: unless-stopped
+
+  # API VM Placement - Asignación de Workers
+  vm_placement_api:
+    build:
+      context: ./vm_placement_api
+      dockerfile: Dockerfile
+    container_name: vm_placement_api
+    environment:
+      - SERVICE_TOKEN=clavesihna
+    networks:
+      - red_cloud
+    restart: unless-stopped
+
+  # Drivers - Bypass para despliegue en clusters
+  drivers:
+    build:
+      context: ./drivers
+      dockerfile: Dockerfile
+    container_name: drivers
+    environment:
+      - SERVICE_TOKEN=clavesihna
+    networks:
+      - red_cloud
+    extra_hosts:
+      - "orquestador-linux:192.168.203.2"
+    restart: unless-stopped
 
   # ========== CONTENEDORES COMPLEMENTARIOS A LAS APIS ==========
+
+  # RabbitMQ - Message Broker
+  rabbitmq:
+    image: rabbitmq:3.12-management
+    container_name: rabbitmq
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - red_cloud
+    restart: unless-stopped
 
   # cAdvisor - Métricas de la red de contenedores
   monitoring_docker_network:
@@ -287,6 +323,7 @@ services:
   imagenes_db:
     image: mysql:8.0
     container_name: imagenes_db
+    command: --max_allowed_packet=1073741824
     environment:
       MYSQL_ROOT_PASSWORD: imagenes_root_pass
       MYSQL_DATABASE: imagenes_db
@@ -300,20 +337,20 @@ services:
     restart: unless-stopped
 
   # Base de datos de slices
-  # slices_db:
-  #   image: mysql:8.0
-  #   container_name: slices_database
-  #   environment:
-  #     MYSQL_ROOT_PASSWORD: slices_root_password_123
-  #     MYSQL_DATABASE: slices_db
-  #     MYSQL_USER: slices_user
-  #     MYSQL_PASSWORD: slices_password_123
-  #   volumes:
-  #     - slices_data:/var/lib/mysql
-  #     - ./mysql/init_slices.sql:/docker-entrypoint-initdb.d/init_slices.sql
-  #   networks:
-  #     - red_cloud
-  #   restart: unless-stopped
+  slices_db:
+    image: mysql:8.0
+    container_name: slices_db
+    environment:
+      MYSQL_ROOT_PASSWORD: slices_root_password_123
+      MYSQL_DATABASE: slices_db
+      MYSQL_USER: slices_user
+      MYSQL_PASSWORD: slices_pass123
+    volumes:
+      - slices_data:/var/lib/mysql
+      - ./databases/init_slices.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - red_cloud
+    restart: unless-stopped
 
 networks:
   red_cloud:

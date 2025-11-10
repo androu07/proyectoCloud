@@ -1,61 +1,55 @@
-#!/usr/bin/env python3
-"""
-Slice Manager API - Gestiona slices de red con validación JWT y conexión a orquestador
-Puerto: 5900 (en contenedor)
-"""
-
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, validator
-from typing import Dict, Any, List, Optional
+from pydantic import BaseModel, Field, validator
 import jwt
+import os
+import httpx
+from typing import Optional, Any, List
 import json
 import mysql.connector
 from mysql.connector import Error
-import requests
 from datetime import datetime
 import logging
 
-# Configurar logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="Slice Manager API", 
+    title="Slice Manager API - Gateway de Seguridad",
     version="1.0.0",
-    description="API para gestión de slices de red con validación JWT y orquestación automática"
+    description="Middleware de autenticación y autorización para todas las APIs"
 )
 
-# Configuración JWT (debe ser la misma que auth_api y orquestador_api)
-JWT_SECRET_KEY = "mi_clave_secreta_super_segura_12345"
-JWT_ALGORITHM = "HS256"
+# Configuración
+JWT_SECRET = os.getenv('JWT_SECRET_KEY', 'mi_clave_secreta_super_segura_12345')
+JWT_ALGORITHM = 'HS256'
+IMAGE_MANAGER_URL = os.getenv('IMAGE_MANAGER_URL', 'http://image_manager_api:5700')
+IMAGE_MANAGER_TOKEN = os.getenv('IMAGE_MANAGER_TOKEN', 'clavesihna')
+QUEUE_MANAGER_URL = os.getenv('QUEUE_MANAGER_URL', 'http://queue_manager:6100')
+DRIVERS_URL = os.getenv('DRIVERS_URL', 'http://drivers:6200')
 
-# Configuración de base de datos MySQL
+# Configuración de BD
 DB_CONFIG = {
-    'host': 'slices_database',
-    'database': 'slices_db',
-    'user': 'slices_user',
-    'password': 'slices_password_123',
-    'port': 3306,
-    'charset': 'utf8mb4',
-    'collation': 'utf8mb4_unicode_ci'
-}
-
-# Configuración del orquestador (desde contenedor al host)
-ORQUESTADOR_URL = "http://host:5807"  # Hostname del host donde corre orquestador_api
-ORQUESTADOR_ENDPOINTS = {
-    'crear_topologia': f"{ORQUESTADOR_URL}/crear-topologia",
-    'desplegar_slice': f"{ORQUESTADOR_URL}/desplegar-slice"
+    'host': os.getenv('DB_HOST', 'slices_db'),
+    'port': int(os.getenv('DB_PORT', 3306)),
+    'database': os.getenv('DB_NAME', 'slices_db'),
+    'user': os.getenv('DB_USER', 'slices_user'),
+    'password': os.getenv('DB_PASSWORD', 'slices_pass123')
 }
 
 security = HTTPBearer()
 
-# ============================================================================
-# MODELOS PYDANTIC
-# ============================================================================
+# ==================== MODELOS ====================
+class UserPayload(BaseModel):
+    id: int
+    nombre_completo: str
+    correo: str
+    rol: str
+    exp: int
+    iat: int
 
+# Modelos para creación de slices
 class VMConfig(BaseModel):
-    """Modelo para configuración de VM"""
     nombre: str
     cores: str
     ram: str
@@ -63,690 +57,1184 @@ class VMConfig(BaseModel):
     puerto_vnc: str = ""
     image: str
     conexiones_vlans: str = ""
-    acceso: str
+    internet: str
     server: str = ""
+    
+    @validator('internet')
+    def validate_internet(cls, v):
+        if v not in ['si', 'no']:
+            raise ValueError('internet debe ser "si" o "no"')
+        return v
 
-class TopologiaConfig(BaseModel):
-    """Modelo para configuración de topología"""
+class Topologia(BaseModel):
     nombre: str
     cantidad_vms: str
-    internet: str
     vms: List[VMConfig]
+    
+    @validator('cantidad_vms')
+    def validate_cantidad_vms(cls, v):
+        try:
+            cantidad = int(v)
+            if cantidad < 2 or cantidad > 6:
+                raise ValueError('cantidad_vms debe ser entre 2 y 6')
+        except ValueError as e:
+            if 'invalid literal' in str(e):
+                raise ValueError('cantidad_vms debe ser un número')
+            raise e
+        return v
 
 class SolicitudJSON(BaseModel):
-    """Modelo para el JSON de solicitud (sin id_slice)"""
-    cantidad_vms: str = ""
+    id_slice: str = ""
+    cantidad_vms: str
     vlans_separadas: str = ""
     vlans_usadas: str = ""
     vncs_separadas: str = ""
     conexion_topologias: str = ""
-    topologias: List[TopologiaConfig]
+    topologias: List[Topologia]
+    
+    @validator('cantidad_vms')
+    def validate_cantidad_vms(cls, v):
+        try:
+            cantidad = int(v)
+            if cantidad < 2 or cantidad > 11:
+                raise ValueError('cantidad_vms debe ser entre 2 y 11')
+        except ValueError as e:
+            if 'invalid literal' in str(e):
+                raise ValueError('cantidad_vms debe ser un número')
+            raise e
+        return v
+    
+    @validator('id_slice')
+    def validate_id_slice_empty(cls, v):
+        if v != "":
+            raise ValueError('id_slice debe estar vacío en la petición inicial')
+        return v
+    
+    @validator('vlans_separadas', 'vlans_usadas', 'vncs_separadas')
+    def validate_empty_fields(cls, v):
+        if v != "":
+            raise ValueError('Este campo debe estar vacío en la petición inicial')
+        return v
     
     @validator('topologias')
     def validate_topologias(cls, v):
-        if not v or len(v) == 0:
-            raise ValueError('Debe incluir al menos una topología')
+        if len(v) < 1 or len(v) > 3:
+            raise ValueError('Debe haber entre 1 y 3 topologías')
         return v
 
-class SolicitudCreacionRequest(BaseModel):
-    """Modelo para la solicitud completa de creación"""
+class SliceCreationRequest(BaseModel):
     nombre_slice: str
+    zona_despliegue: str
     solicitud_json: SolicitudJSON
     
-    @validator('nombre_slice')
-    def validate_nombre_slice(cls, v):
-        if not v or not v.strip():
-            raise ValueError('El nombre_slice no puede estar vacío')
-        return v.strip()
+    @validator('zona_despliegue')
+    def validate_zona_despliegue(cls, v):
+        if v not in ['linux', 'openstack']:
+            raise ValueError('zona_despliegue debe ser "linux" o "openstack"')
+        return v
 
-class SolicitudCreacionResponse(BaseModel):
-    """Modelo para la respuesta de solicitud de creación"""
-    success: bool
-    message: str
-    slice_id: Optional[int] = None
-    slice_details: Optional[Dict[str, Any]] = None
-    orquestador_response: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-
-# ============================================================================
-# FUNCIONES DE BASE DE DATOS
-# ============================================================================
-
-def get_db_connection():
-    """Crear conexión a la base de datos MySQL"""
+# Verificar y decodificar JWT
+def verify_jwt_token(token: str) -> dict:
+    """Verificar token JWT y retornar payload"""
     try:
-        connection = mysql.connector.connect(**DB_CONFIG)
-        return connection
-    except Error as e:
-        logger.error(f"Error conectando a MySQL: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error de conexión a base de datos"
-        )
-
-def insert_slice_to_db(usuario: str, nombre_slice: str, vms_json: Dict[str, Any]) -> int:
-    """Insertar slice en la base de datos y retornar el ID generado"""
-    connection = None
-    try:
-        connection = get_db_connection()
-        cursor = connection.cursor()
-        
-        # Insertar slice
-        insert_query = """
-        INSERT INTO slices (usuario, nombre_slice, vms, estado, timestamp) 
-        VALUES (%s, %s, %s, %s, %s)
-        """
-        
-        timestamp = datetime.now()
-        cursor.execute(insert_query, (
-            usuario,
-            nombre_slice, 
-            json.dumps(vms_json),
-            'creado',
-            timestamp
-        ))
-        
-        # Obtener el ID generado
-        slice_id = cursor.lastrowid
-        connection.commit()
-        
-        logger.info(f"Slice creado en BD: ID={slice_id}, Usuario={usuario}, Nombre={nombre_slice}")
-        return slice_id
-        
-    except Error as e:
-        logger.error(f"Error insertando slice en BD: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error guardando slice en base de datos"
-        )
-    finally:
-        if connection and connection.is_connected():
-            cursor.close()
-            connection.close()
-
-def update_slice_status_and_vms(slice_id: int, new_status: str, updated_vms: Dict[str, Any]) -> bool:
-    """Actualizar estado y VMs del slice"""
-    connection = None
-    try:
-        connection = get_db_connection()
-        cursor = connection.cursor()
-        
-        update_query = """
-        UPDATE slices 
-        SET estado = %s, vms = %s, timestamp = %s
-        WHERE id = %s
-        """
-        
-        timestamp = datetime.now()
-        cursor.execute(update_query, (
-            new_status,
-            json.dumps(updated_vms),
-            timestamp,
-            slice_id
-        ))
-        
-        connection.commit()
-        rows_affected = cursor.rowcount
-        
-        logger.info(f"Slice actualizado: ID={slice_id}, Estado={new_status}, Filas={rows_affected}")
-        return rows_affected > 0
-        
-    except Error as e:
-        logger.error(f"Error actualizando slice en BD: {e}")
-        return False
-    finally:
-        if connection and connection.is_connected():
-            cursor.close()
-            connection.close()
-
-# ============================================================================
-# FUNCIONES DE VALIDACIÓN JWT
-# ============================================================================
-
-def verify_jwt_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """
-    Verificar token JWT del auth_api
-    """
-    try:
-        token = credentials.credentials
-        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
-        
-        # Verificar que el token no haya expirado
-        exp = payload.get("exp")
-        if exp and datetime.utcnow().timestamp() > exp:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token caducado o inválido"
-            )
-        
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         return payload
-        
     except jwt.ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token caducado o inválido"
+            detail="Token expirado"
         )
     except jwt.InvalidTokenError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token caducado o inválido"
+            detail="Token inválido"
         )
 
-def format_user_from_token(token_payload: Dict[str, Any]) -> str:
-    """
-    Formatear usuario desde token JWT: {id}-{nombre_completo}
-    """
-    try:
-        user_id = token_payload.get("id")
-        nombre_completo = token_payload.get("nombre_completo", "")
-        
-        if not user_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Token JWT no contiene ID de usuario válido"
-            )
-        
-        if not nombre_completo:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Token JWT no contiene nombre_completo válido"
-            )
-        
-        return f"{user_id}-{nombre_completo}"
-        
-    except Exception as e:
-        logger.error(f"Error formateando usuario desde token: {e}")
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+    """Obtener usuario actual desde JWT"""
+    return verify_jwt_token(credentials.credentials)
+
+def require_admin(user: dict = Depends(get_current_user)) -> dict:
+    """Verificar que el usuario tenga rol de admin"""
+    if user.get('rol') != 'admin':
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Error procesando información de usuario del token"
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acceso denegado: se requieren privilegios de administrador"
         )
+    return user
 
-# ============================================================================
-# FUNCIONES DE COMUNICACIÓN CON ORQUESTADOR
-# ============================================================================
-
-async def send_to_orquestador(json_data: Dict[str, Any]) -> Dict[str, Any]:
+# Función para hacer proxy a image_manager_api
+async def proxy_to_image_manager(
+    method: str,
+    path: str,
+    data: Optional[dict] = None,
+    files: Optional[dict] = None,
+    params: Optional[dict] = None
+) -> tuple[int, Any]:
     """
-    Enviar JSON al orquestador para despliegue
+    Hacer proxy de la petición al image_manager_api
+    Retorna: (status_code, response_data)
     """
+    url = f"{IMAGE_MANAGER_URL}{path}"
+    headers = {
+        "Authorization": f"Bearer {IMAGE_MANAGER_TOKEN}"
+    }
+    
     try:
-        logger.info(f"Enviando al orquestador: slice_id={json_data.get('id_slice')}")
-        
-        headers = {
-            'Content-Type': 'application/json'
-        }
-        
-        # Enviar al endpoint de despliegue completo
-        response = requests.post(
-            ORQUESTADOR_ENDPOINTS['desplegar_slice'],
-            json={'json_config': json_data},
-            headers=headers,
-            timeout=300  # 5 minutos de timeout
+        async with httpx.AsyncClient(timeout=300.0, verify=False) as client:
+            if method == "GET":
+                response = await client.get(url, headers=headers, params=params)
+            elif method == "POST":
+                if files:
+                    response = await client.post(url, headers=headers, files=files, data=data)
+                else:
+                    headers["Content-Type"] = "application/json"
+                    response = await client.post(url, headers=headers, json=data)
+            elif method == "DELETE":
+                response = await client.delete(url, headers=headers)
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+                    detail=f"Método {method} no soportado"
+                )
+            
+            # Intentar parsear como JSON
+            try:
+                response_data = response.json()
+            except:
+                response_data = {"message": response.text}
+            
+            return response.status_code, response_data
+            
+    except httpx.TimeoutException:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Timeout al comunicarse con image_manager_api"
         )
-        
-        response_data = response.json()
-        
-        logger.info(f"Respuesta orquestador: status={response.status_code}, success={response_data.get('success')}")
-        
-        return {
-            'status_code': response.status_code,
-            'success': response_data.get('success', False),
-            'message': response_data.get('message', ''),
-            'details': response_data
-        }
-        
-    except requests.exceptions.Timeout:
-        logger.error("Timeout comunicándose con orquestador")
-        return {
-            'status_code': 408,
-            'success': False,
-            'message': 'Timeout comunicándose con orquestador',
-            'details': {'error': 'timeout'}
-        }
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error comunicándose con orquestador: {e}")
-        return {
-            'status_code': 500,
-            'success': False,
-            'message': f'Error comunicándose con orquestador: {str(e)}',
-            'details': {'error': str(e)}
-        }
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Error al comunicarse con image_manager_api: {str(e)}"
+        )
 
-# ============================================================================
-# ENDPOINTS
-# ============================================================================
+# ==================== ENDPOINTS RAÍZ ====================
 
 @app.get("/")
 async def root():
-    """Endpoint de prueba"""
     return {
-        "service": "Slice Manager API",
+        "message": "Slice Manager API - Gateway de Seguridad",
+        "status": "activo",
         "version": "1.0.0",
-        "status": "running",
-        "port": 5900,
-        "timestamp": datetime.now().isoformat()
+        "endpoints": {
+            "image_manager": "/img-mngr/*"
+        }
     }
 
 @app.get("/health")
 async def health_check():
-    """Health check"""
     return {
-        "status": "healthy",
-        "service": "slice_manager_api",
-        "timestamp": datetime.now().isoformat()
+        "status": "OK",
+        "services": {
+            "image_manager_api": IMAGE_MANAGER_URL
+        }
     }
 
-@app.post("/solicitud_creacion", response_model=SolicitudCreacionResponse)
-async def solicitud_creacion(
-    request: SolicitudCreacionRequest,
-    user_info: dict = Depends(verify_jwt_token)
+# ==================== ENDPOINTS IMAGE MANAGER ====================
+
+@app.post("/img-mngr/import-image")
+async def import_image_from_url(
+    request: Request,
+    admin_user: dict = Depends(require_admin)
 ):
     """
-    Endpoint principal: Crear solicitud de slice con validación JWT y orquestación
-    
-    Flujo:
-    1. Valida token JWT (no caducado, válido)
-    2. Valida nombre_slice (no vacío)
-    3. Valida estructura JSON de solicitud
-    4. Guarda en BD con estado 'creado'
-    5. Rellena id_slice en JSON
-    6. Actualiza VMs en BD
-    7. Envía a orquestador para despliegue
-    8. Actualiza estado según respuesta del orquestador
-    
-    Parámetros:
-    - Authorization: Bearer <JWT_TOKEN> (header)
-    - nombre_slice: Nombre del slice (no vacío)
-    - solicitud_json: JSON con estructura de topologías (sin id_slice)
-    
-    Retorna:
-    - Detalles del slice creado y respuesta del orquestador
+    Importar imagen desde URL (solo admin)
+    Proxy a: POST /import-image del image_manager_api
     """
     try:
-        logger.info(f"Nueva solicitud de creación de slice")
-        logger.info(f"Usuario: {user_info.get('correo', 'N/A')}")
-        logger.info(f"Nombre slice: {request.nombre_slice}")
-        
-        # 1. Formatear usuario desde token
-        usuario_formateado = format_user_from_token(user_info)
-        logger.info(f"Usuario formateado: {usuario_formateado}")
-        
-        # 2. Convertir solicitud_json a dict y preparar para BD
-        solicitud_dict = request.solicitud_json.dict()
-        
-        # 3. Guardar en BD (sin id_slice aún)
-        slice_id = insert_slice_to_db(
-            usuario=usuario_formateado,
-            nombre_slice=request.nombre_slice,
-            vms_json=solicitud_dict
+        body = await request.json()
+        status_code, response_data = await proxy_to_image_manager(
+            method="POST",
+            path="/import-image",
+            data=body
         )
         
-        # 4. Rellenar id_slice en el JSON
-        solicitud_dict["id_slice"] = str(slice_id)
+        if status_code >= 400:
+            raise HTTPException(status_code=status_code, detail=response_data)
         
-        # 5. Actualizar VMs en BD con id_slice incluido
-        update_slice_status_and_vms(slice_id, 'creado', solicitud_dict)
+        return response_data
         
-        # 6. Enviar al orquestador para despliegue
-        logger.info(f"Enviando slice {slice_id} al orquestador")
-        orquestador_response = await send_to_orquestador(solicitud_dict)
-        
-        # 7. Actualizar estado según respuesta del orquestador
-        if orquestador_response['success']:
-            # Despliegue exitoso - actualizar estado a 'activa'
-            # También actualizar con el JSON procesado del orquestador si está disponible
-            processed_json = solicitud_dict
-            
-            # DEBUG: Log de la estructura de respuesta del orquestador
-            logger.info(f"DEBUG: Estructura orquestador_response keys: {orquestador_response.keys()}")
-            if 'details' in orquestador_response:
-                logger.info(f"DEBUG: Estructura details keys: {orquestador_response['details'].keys()}")
-                if 'deployment_details' in orquestador_response['details']:
-                    logger.info(f"DEBUG: Estructura deployment_details keys: {orquestador_response['details']['deployment_details'].keys()}")
-            
-            # Buscar processed_config en diferentes ubicaciones posibles
-            if 'details' in orquestador_response and 'processed_config' in orquestador_response['details']:
-                processed_json = orquestador_response['details']['processed_config']
-                logger.info(f"DEBUG: Encontrado processed_config en details")
-            elif 'details' in orquestador_response and 'deployment_details' in orquestador_response['details'] and 'processed_config' in orquestador_response['details']['deployment_details']:
-                processed_json = orquestador_response['details']['deployment_details']['processed_config']
-                logger.info(f"DEBUG: Encontrado processed_config en deployment_details")
-            else:
-                logger.warning(f"DEBUG: No se encontró processed_config, usando JSON original")
-            
-            update_slice_status_and_vms(slice_id, 'activa', processed_json)
-            
-            logger.info(f"Slice {slice_id} desplegado exitosamente - estado: activa")
-            
-            return SolicitudCreacionResponse(
-                success=True,
-                message=f"Slice '{request.nombre_slice}' creado y desplegado exitosamente",
-                slice_id=slice_id,
-                slice_details={
-                    'id': slice_id,
-                    'usuario': usuario_formateado,
-                    'nombre_slice': request.nombre_slice,
-                    'estado': 'activa',
-                    'timestamp': datetime.now().isoformat()
-                },
-                orquestador_response=orquestador_response
-            )
-        else:
-            # Error en despliegue - mantener estado 'creado' y reportar error
-            logger.warning(f"Error en despliegue de slice {slice_id}: {orquestador_response['message']}")
-            
-            return SolicitudCreacionResponse(
-                success=False,
-                message=f"Slice '{request.nombre_slice}' creado pero falló el despliegue: {orquestador_response['message']}",
-                slice_id=slice_id,
-                slice_details={
-                    'id': slice_id,
-                    'usuario': usuario_formateado,
-                    'nombre_slice': request.nombre_slice,
-                    'estado': 'creado',
-                    'timestamp': datetime.now().isoformat()
-                },
-                orquestador_response=orquestador_response,
-                error="deployment_failed"
-            )
-            
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error interno en solicitud_creacion: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno: {str(e)}"
+        )
+
+@app.post("/img-mngr/upload-image")
+async def upload_image_file(
+    request: Request,
+    admin_user: dict = Depends(require_admin)
+):
+    """
+    Subir imagen como archivo (solo admin)
+    Proxy a: POST /upload-image del image_manager_api
+    """
+    try:
+        # Obtener form data
+        form = await request.form()
+        
+        # Preparar files y data para el proxy
+        files = {}
+        data = {}
+        
+        for key, value in form.items():
+            if hasattr(value, 'file'):  # Es un archivo
+                files[key] = (value.filename, value.file, value.content_type)
+            else:  # Es un campo normal
+                data[key] = value
+        
+        status_code, response_data = await proxy_to_image_manager(
+            method="POST",
+            path="/upload-image",
+            data=data,
+            files=files
+        )
+        
+        if status_code >= 400:
+            raise HTTPException(status_code=status_code, detail=response_data)
+        
+        return response_data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno: {str(e)}"
+        )
+
+@app.get("/img-mngr/list-images")
+async def list_images(
+    admin_user: dict = Depends(require_admin)
+):
+    """
+    Listar todas las imágenes (solo admin)
+    Proxy a: GET /list-images del image_manager_api
+    """
+    try:
+        status_code, response_data = await proxy_to_image_manager(
+            method="GET",
+            path="/list-images"
+        )
+        
+        if status_code >= 400:
+            raise HTTPException(status_code=status_code, detail=response_data)
+        
+        return response_data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno: {str(e)}"
+        )
+
+@app.delete("/img-mngr/delete-image/{image_id}")
+async def delete_image(
+    image_id: int,
+    admin_user: dict = Depends(require_admin)
+):
+    """
+    Eliminar imagen por ID (solo admin)
+    Proxy a: DELETE /delete-image/{image_id} del image_manager_api
+    """
+    try:
+        status_code, response_data = await proxy_to_image_manager(
+            method="DELETE",
+            path=f"/delete-image/{image_id}"
+        )
+        
+        if status_code >= 400:
+            raise HTTPException(status_code=status_code, detail=response_data)
+        
+        return response_data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno: {str(e)}"
+        )
+
+@app.get("/img-mngr/download")
+async def download_image(
+    nombre: str,
+    admin_user: dict = Depends(require_admin)
+):
+    """
+    Descargar imagen por nombre (solo admin)
+    Proxy a: GET /download?nombre={nombre} del image_manager_api
+    """
+    try:
+        from fastapi.responses import StreamingResponse
+        
+        url = f"{IMAGE_MANAGER_URL}/download"
+        headers = {"Authorization": f"Bearer {IMAGE_MANAGER_TOKEN}"}
+        params = {"nombre": nombre}
+        
+        async with httpx.AsyncClient(timeout=300.0, verify=False) as client:
+            response = await client.get(url, headers=headers, params=params)
+            
+            if response.status_code >= 400:
+                try:
+                    error_data = response.json()
+                except:
+                    error_data = {"detail": response.text}
+                raise HTTPException(status_code=response.status_code, detail=error_data)
+            
+            # Streaming de la descarga
+            return StreamingResponse(
+                iter([response.content]),
+                media_type=response.headers.get('content-type', 'application/octet-stream'),
+                headers={
+                    'Content-Disposition': response.headers.get('Content-Disposition', f'attachment; filename="{nombre}.qcow2.zst"'),
+                    'X-Image-Format': response.headers.get('X-Image-Format', 'qcow2.zst'),
+                    'X-Image-Name': response.headers.get('X-Image-Name', nombre)
+                }
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno: {str(e)}"
+        )
+
+# ==================== ENDPOINTS SLICE CREATION ====================
+
+@app.post("/slices/create")
+async def create_slice(
+    slice_request: SliceCreationRequest,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Crear un nuevo slice (requiere autenticación JWT)
+    
+    Flujo completo:
+    1. Valida JSON y guarda slice en BD (estado: creando)
+    2. Obtiene id_slice del auto-increment
+    3. Envía a queue_manager para mapeo de workers
+    4. Actualiza BD con JSON mapeado + timestamp_creacion
+    5. Envía a drivers para despliegue en cluster
+    6. Actualiza BD con JSON final + timestamp_despliegue
+    """
+    connection = None
+    cursor = None
+    slice_id = None
+    
+    try:
+        # Validar conexion_topologias según número de topologías
+        num_topologias = len(slice_request.solicitud_json.topologias)
+        conexion_topologias = slice_request.solicitud_json.conexion_topologias
+        
+        if num_topologias == 1:
+            if conexion_topologias != "":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="conexion_topologias debe estar vacío cuando solo hay 1 topología"
+                )
+        elif num_topologias == 2:
+            if not conexion_topologias or '-' not in conexion_topologias:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="conexion_topologias debe tener formato 'vmX-vmY' cuando hay 2 topologías"
+                )
+            if ',' in conexion_topologias:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Solo debe haber una conexión entre topologías cuando hay 2 topologías"
+                )
+        elif num_topologias == 3:
+            if not conexion_topologias or '-' not in conexion_topologias:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="conexion_topologias debe tener formato 'vmX-vmY,vmW-vmZ' cuando hay 3 topologías"
+                )
+        
+        # Validar que cada VM tenga puerto_vnc, conexiones_vlans y server vacíos
+        for topologia in slice_request.solicitud_json.topologias:
+            for vm in topologia.vms:
+                if vm.puerto_vnc != "":
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"puerto_vnc de {vm.nombre} debe estar vacío en la petición inicial"
+                    )
+                if vm.conexiones_vlans != "":
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"conexiones_vlans de {vm.nombre} debe estar vacío en la petición inicial"
+                    )
+                if vm.server != "":
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"server de {vm.nombre} debe estar vacío en la petición inicial"
+                    )
+        
+        # ==== PASO 1: Crear slice en BD (estado: creando) ====
+        connection = mysql.connector.connect(**DB_CONFIG)
+        cursor = connection.cursor(dictionary=True)
+        
+        insert_query = """
+            INSERT INTO slices 
+            (usuario, nombre_slice, tipo) 
+            VALUES (%s, %s, %s)
+        """
+        cursor.execute(insert_query, (
+            user['id'],
+            slice_request.nombre_slice,
+            'creando'
+        ))
+        connection.commit()
+        
+        # Obtener el ID generado
+        slice_id = cursor.lastrowid
+        logger.info(f"Slice {slice_id} creado en BD - Estado: creando")
+        
+        # Crear el JSON completo preservando el orden original
+        request_dict = json.loads(slice_request.json())
+        request_dict['solicitud_json']['id_slice'] = str(slice_id)
+        
+        # ==== PASO 2: Mapeo de workers (queue_manager + vm_placement) ====
+        logger.info(f"Slice {slice_id}: Iniciando mapeo de workers...")
+        
+        try:
+            # 2.1 Encolar en queue_manager
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                enqueue_response = await client.post(
+                    f"{QUEUE_MANAGER_URL}/enqueue-placement",
+                    json=request_dict,
+                    headers={"Authorization": f"Bearer {IMAGE_MANAGER_TOKEN}"}
+                )
+                
+                if enqueue_response.status_code != 200:
+                    raise Exception(f"Error al encolar: {enqueue_response.text}")
+            
+            # 2.2 Procesar desde la cola (obtiene mapeo de workers)
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                process_response = await client.post(
+                    f"{QUEUE_MANAGER_URL}/process-from-queue",
+                    headers={"Authorization": f"Bearer {IMAGE_MANAGER_TOKEN}"}
+                )
+                
+                if process_response.status_code != 200:
+                    raise Exception(f"Error al procesar cola: {process_response.text}")
+                
+                result = process_response.json()
+            
+            # 2.3 Obtener el JSON con servers asignados
+            mapped_json = result['result']['peticion_json']
+            logger.info(f"Slice {slice_id}: Mapeo de workers completado")
+            
+        except Exception as e:
+            logger.error(f"Slice {slice_id}: Error en mapeo de workers: {str(e)}")
+            cursor.close()
+            connection.close()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error en mapeo de workers: {str(e)}"
+            )
+        
+        # ==== PASO 3: Guardar JSON mapeado + timestamp_creacion ====
+        timestamp_creacion = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        update_query = """
+            UPDATE slices 
+            SET peticion_json = %s,
+                timestamp_creacion = %s
+            WHERE id = %s
+        """
+        cursor.execute(update_query, (
+            json.dumps(mapped_json, ensure_ascii=False),
+            timestamp_creacion,
+            slice_id
+        ))
+        connection.commit()
+        logger.info(f"Slice {slice_id}: JSON mapeado guardado con timestamp_creacion")
+        
+        # ==== PASO 4: Desplegar en cluster (drivers) ====
+        logger.info(f"Slice {slice_id}: Iniciando despliegue en cluster {slice_request.zona_despliegue}...")
+        
+        try:
+            async with httpx.AsyncClient(timeout=300.0) as client:  # 5 min timeout para despliegue
+                deploy_response = await client.post(
+                    f"{DRIVERS_URL}/deploy-slice",
+                    json={"json_config": mapped_json},
+                    headers={"Authorization": f"Bearer {IMAGE_MANAGER_TOKEN}"}
+                )
+                
+                deploy_result = deploy_response.json()
+                
+                # Analizar respuesta
+                if deploy_response.status_code != 200:
+                    error_detail = deploy_result.get('detail', {})
+                    
+                    # Error de conexión con orquestador
+                    if isinstance(error_detail, dict) and 'Conexión fallida' in error_detail.get('message', ''):
+                        logger.error(f"Slice {slice_id}: Conexión fallida con orquestador")
+                        cursor.close()
+                        connection.close()
+                        raise HTTPException(
+                            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail=f"Conexión fallida con orquestador {slice_request.zona_despliegue}"
+                        )
+                    
+                    # Error durante despliegue (ya se ejecutó rollback en drivers)
+                    logger.error(f"Slice {slice_id}: Problema al desplegar - {error_detail}")
+                    cursor.close()
+                    connection.close()
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=error_detail
+                    )
+                
+                # Despliegue exitoso
+                if not deploy_result.get('success'):
+                    logger.error(f"Slice {slice_id}: Despliegue no exitoso")
+                    cursor.close()
+                    connection.close()
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=deploy_result.get('error', 'Error desconocido en despliegue')
+                    )
+                
+                logger.info(f"Slice {slice_id}: Despliegue completado exitosamente")
+                
+                # Obtener JSON procesado completo del orquestador
+                processed_json = deploy_result.get('processed_json', mapped_json)
+                
+        except httpx.TimeoutException:
+            logger.error(f"Slice {slice_id}: Timeout en despliegue")
+            cursor.close()
+            connection.close()
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="Timeout durante el despliegue (>5 minutos)"
+            )
+        except httpx.ConnectError:
+            logger.error(f"Slice {slice_id}: Error de conexión con drivers")
+            cursor.close()
+            connection.close()
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="No se pudo conectar con el servicio de drivers"
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Slice {slice_id}: Error inesperado en despliegue: {str(e)}")
+            cursor.close()
+            connection.close()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error inesperado durante el despliegue: {str(e)}"
+            )
+        
+        # ==== PASO 5: Actualizar BD con JSON final + timestamp_despliegue + estado ====
+        timestamp_despliegue = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        update_final_query = """
+            UPDATE slices 
+            SET peticion_json = %s,
+                timestamp_despliegue = %s,
+                tipo = %s,
+                estado = %s
+            WHERE id = %s
+        """
+        cursor.execute(update_final_query, (
+            json.dumps(processed_json, ensure_ascii=False),
+            timestamp_despliegue,
+            'desplegado',
+            'corriendo',
+            slice_id
+        ))
+        connection.commit()
+        logger.info(f"Slice {slice_id}: JSON final guardado con timestamp_despliegue - Estado: desplegado/corriendo")
+        
+        cursor.close()
+        connection.close()
+        
+        return {
+            "success": True,
+            "message": f"Slice {slice_id} creado y desplegado exitosamente",
+            "slice_id": slice_id,
+            "nombre_slice": slice_request.nombre_slice,
+            "zona_despliegue": slice_request.zona_despliegue,
+            "usuario_id": user['id'],
+            "usuario_correo": user['correo'],
+            "tipo": "desplegado",
+            "estado": "corriendo",
+            "timestamp_creacion": timestamp_creacion,
+            "timestamp_despliegue": timestamp_despliegue,
+            "peticion_json": processed_json
+        }
+        
+    except HTTPException:
+        # Limpiar conexión si está abierta
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+        raise
+    except Exception as e:
+        logger.error(f"Error inesperado en create_slice: {str(e)}")
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error interno del servidor: {str(e)}"
         )
-
-@app.get("/listar_slices")
-async def listar_slices(user_info: Dict[str, Any] = Depends(verify_jwt_token)):
-    """
-    Listar slices según el rol del usuario:
-    - admin: Ve todos los slices
-    - cliente: Solo ve sus propios slices (donde el ID del JWT coincida con el ID del slice)
-    """
-    try:
-        user_id = user_info.get("id")
-        user_rol = user_info.get("rol", "cliente")
-        
-        logger.info(f"Listando slices - Usuario ID: {user_id}, Rol: {user_rol}")
-        
-        connection = get_db_connection()
-        if not connection:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Error conectando a la base de datos"
-            )
-        
-        cursor = connection.cursor(dictionary=True)
-        
-        if user_rol == "admin":
-            # Admin ve todos los slices
-            query = "SELECT * FROM slices ORDER BY timestamp DESC"
-            cursor.execute(query)
-            logger.info("Admin: Consultando todos los slices")
-        else:
-            # Cliente solo ve sus propios slices
-            # Filtramos por slices que comiencen con "{user_id}-"
-            query = "SELECT * FROM slices WHERE usuario LIKE %s ORDER BY timestamp DESC"
-            cursor.execute(query, (f"{user_id}-%",))
-            logger.info(f"Cliente ID {user_id}: Consultando solo sus slices")
-        
-        slices = cursor.fetchall()
-        
-        # Procesar los resultados para convertir JSON strings a objetos
-        processed_slices = []
-        for slice_data in slices:
-            processed_slice = dict(slice_data)
-            
-            # Convertir el campo 'vms' de JSON string a objeto
-            if processed_slice.get('vms'):
-                try:
-                    processed_slice['vms'] = json.loads(processed_slice['vms'])
-                except json.JSONDecodeError as e:
-                    logger.warning(f"Error parseando JSON en slice {processed_slice['id']}: {e}")
-                    processed_slice['vms'] = {}
-            
-            # Convertir timestamp a string ISO si es datetime
-            if processed_slice.get('timestamp'):
-                if isinstance(processed_slice['timestamp'], datetime):
-                    processed_slice['timestamp'] = processed_slice['timestamp'].isoformat()
-            
-            processed_slices.append(processed_slice)
-        
-        result = {
-            "success": True,
-            "message": f"Slices recuperados exitosamente para rol '{user_rol}'",
-            "total_slices": len(processed_slices),
-            "slices": processed_slices,
-            "user_info": {
-                "id": user_id,
-                "rol": user_rol,
-                "correo": user_info.get("correo", "")
-            }
-        }
-        
-        logger.info(f"Slices listados exitosamente: {len(processed_slices)} slices para usuario {user_id} (rol: {user_rol})")
-        return result
         
     except HTTPException:
         raise
     except Error as e:
-        logger.error(f"Error de base de datos en listar_slices: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error consultando slices en la base de datos"
+            detail=f"Error en base de datos: {str(e)}"
         )
     except Exception as e:
-        logger.error(f"Error interno en listar_slices: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error interno del servidor: {str(e)}"
+            detail=f"Error interno: {str(e)}"
         )
-    finally:
-        if connection and connection.is_connected():
+
+@app.post("/slices/{slice_id}/process-placement")
+async def process_placement(
+    slice_id: int,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Procesar placement de VMs para un slice
+    1. Obtiene el JSON de la BD
+    2. Lo envía al queue_manager
+    3. Procesa desde la cola
+    4. Actualiza la BD con los servers asignados
+    """
+    try:
+        # Obtener el slice de la BD
+        connection = mysql.connector.connect(**DB_CONFIG)
+        cursor = connection.cursor(dictionary=True)
+        
+        query = "SELECT peticion_json FROM slices WHERE id = %s AND usuario = %s"
+        cursor.execute(query, (slice_id, user['id']))
+        slice_data = cursor.fetchone()
+        
+        if not slice_data:
             cursor.close()
             connection.close()
-
-# ============================================================================
-# FUNCIONES DE COMUNICACIÓN CON MANAGER LINUX
-# ============================================================================
-
-async def call_manager_linux(operation: str, slice_id: int, jwt_token: str) -> Dict[str, Any]:
-    """
-    Llamar al Manager Linux API para operaciones de slice
-    """
-    try:
-        manager_linux_url = "http://manager_linux:5950"  # Manager Linux container
-        url = f"{manager_linux_url}/{operation}_slice"
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Slice {slice_id} no encontrado o no pertenece al usuario"
+            )
         
-        headers = {
-            "Authorization": f"Bearer {jwt_token}",
-            "Content-Type": "application/json"
-        }
-        payload = {"slice_id": slice_id}
+        peticion_json = json.loads(slice_data['peticion_json'])
         
-        logger.info(f"Llamando Manager Linux: {operation} slice {slice_id}")
-        
-        response = requests.post(url, json=payload, headers=headers, timeout=120)
-        
-        if response.status_code == 200:
-            result = response.json()
-            logger.info(f"✅ Manager Linux - {operation} slice {slice_id} exitoso")
-            return {
-                'success': True,
-                'status_code': response.status_code,
-                'data': result
-            }
-        else:
-            error_msg = f"HTTP {response.status_code}"
-            try:
-                error_data = response.json()
-                error_msg = error_data.get('detail', error_msg)
-            except:
-                error_msg = response.text
+        # 1. Encolar en queue_manager
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            enqueue_response = await client.post(
+                f"{QUEUE_MANAGER_URL}/enqueue-placement",
+                json=peticion_json,
+                headers={"Authorization": f"Bearer {IMAGE_MANAGER_TOKEN}"}
+            )
             
-            logger.error(f"❌ Manager Linux - {operation} slice {slice_id} falló: {error_msg}")
-            return {
-                'success': False,
-                'status_code': response.status_code,
-                'error': error_msg
-            }
+            if enqueue_response.status_code != 200:
+                raise HTTPException(
+                    status_code=enqueue_response.status_code,
+                    detail=f"Error al encolar: {enqueue_response.text}"
+                )
+        
+        # 2. Procesar desde la cola
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            process_response = await client.post(
+                f"{QUEUE_MANAGER_URL}/process-from-queue",
+                headers={"Authorization": f"Bearer {IMAGE_MANAGER_TOKEN}"}
+            )
             
-    except requests.exceptions.RequestException as e:
-        logger.error(f"❌ Error comunicación con Manager Linux: {str(e)}")
+            if process_response.status_code != 200:
+                raise HTTPException(
+                    status_code=process_response.status_code,
+                    detail=f"Error al procesar cola: {process_response.text}"
+                )
+            
+            result = process_response.json()
+        
+        # 3. Actualizar BD con el JSON que incluye servers asignados
+        updated_json = result['result']['peticion_json']
+        
+        update_query = "UPDATE slices SET peticion_json = %s WHERE id = %s"
+        cursor.execute(update_query, (
+            json.dumps(updated_json, ensure_ascii=False),
+            slice_id
+        ))
+        connection.commit()
+        
+        cursor.close()
+        connection.close()
+        
         return {
-            'success': False,
-            'status_code': None,
-            'error': f"Error de conexión: {str(e)}"
+            "success": True,
+            "message": "Placement procesado y actualizado exitosamente",
+            "slice_id": slice_id,
+            "total_vms_assigned": result['result']['total_vms_assigned'],
+            "workers_used": result['result']['workers_used']
         }
+        
+    except HTTPException:
+        raise
+    except Error as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error en base de datos: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno: {str(e)}"
+        )
 
-# ============================================================================
-# MODELOS PARA NUEVOS ENDPOINTS
-# ============================================================================
+# ==================== ENDPOINTS DE GESTIÓN DE SLICES ====================
 
-class SliceActionRequest(BaseModel):
-    """Modelo para acciones de slice (pausar, reanudar, eliminar)"""
-    slice_id: int
+@app.get("/slices/list")
+async def list_slices(
+    user: dict = Depends(get_current_user)
+):
+    """
+    Listar slices según el rol del usuario
     
-    @validator('slice_id')
-    def validate_slice_id(cls, v):
-        if v <= 0:
-            raise ValueError('slice_id debe ser un entero positivo')
-        return v
-
-class SliceActionResponse(BaseModel):
-    """Modelo para respuestas de acciones de slice"""
-    success: bool
-    message: str
-    slice_id: int
-    operation: str
-    manager_linux_response: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-
-# ============================================================================
-# NUEVOS ENDPOINTS DE GESTIÓN DE SLICES
-# ============================================================================
-
-@app.post("/pausar_slice", response_model=SliceActionResponse)
-async def pausar_slice(
-    request: SliceActionRequest,
-    credentials: HTTPAuthorizationCredentials = Depends(security)
-):
-    """
-    Pausar un slice usando Manager Linux API
+    - Cliente: Solo sus slices (donde usuario == user_id)
+    - Admin: Todos los slices
+    
+    Solo se listan slices con tipo='desplegado'
     """
     try:
-        slice_id = request.slice_id
-        jwt_token = credentials.credentials
+        connection = mysql.connector.connect(**DB_CONFIG)
+        cursor = connection.cursor(dictionary=True)
         
-        logger.info(f"⏸️ Solicitud pausar slice {slice_id}")
-        
-        # Llamar al Manager Linux API
-        result = await call_manager_linux("pausar", slice_id, jwt_token)
-        
-        if result['success']:
-            return SliceActionResponse(
-                success=True,
-                message=f"Slice {slice_id} pausado exitosamente",
-                slice_id=slice_id,
-                operation="pausar",
-                manager_linux_response=result['data']
-            )
+        if user['rol'] == 'admin':
+            # Admin ve todos los slices desplegados
+            query = """
+                SELECT id, usuario, nombre_slice, tipo, estado, 
+                       timestamp_creacion, timestamp_despliegue
+                FROM slices 
+                WHERE tipo = 'desplegado'
+                ORDER BY id DESC
+            """
+            cursor.execute(query)
         else:
-            return SliceActionResponse(
-                success=False,
-                message=f"Error pausando slice {slice_id}",
-                slice_id=slice_id,
-                operation="pausar",
-                error=result['error']
-            )
-            
+            # Cliente solo ve sus slices desplegados
+            query = """
+                SELECT id, usuario, nombre_slice, tipo, estado,
+                       timestamp_creacion, timestamp_despliegue
+                FROM slices 
+                WHERE tipo = 'desplegado' AND usuario = %s
+                ORDER BY id DESC
+            """
+            cursor.execute(query, (user['id'],))
+        
+        slices = cursor.fetchall()
+        
+        cursor.close()
+        connection.close()
+        
+        return {
+            "success": True,
+            "total_slices": len(slices),
+            "usuario_rol": user['rol'],
+            "slices": slices
+        }
+        
+    except Error as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error en base de datos: {str(e)}"
+        )
     except Exception as e:
-        logger.error(f"Error interno pausando slice {request.slice_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error interno: {str(e)}"
         )
 
-@app.post("/reanudar_slice", response_model=SliceActionResponse)
-async def reanudar_slice(
-    request: SliceActionRequest,
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+@app.post("/slices/delete/{slice_id}")
+async def delete_slice(
+    slice_id: int,
+    user: dict = Depends(get_current_user)
 ):
     """
-    Reanudar un slice usando Manager Linux API
+    Eliminar un slice
+    
+    - Cliente: Solo puede eliminar sus propios slices con tipo='desplegado'
+    - Admin: Puede eliminar cualquier slice sin restricciones
     """
     try:
-        slice_id = request.slice_id
-        jwt_token = credentials.credentials
+        connection = mysql.connector.connect(**DB_CONFIG)
+        cursor = connection.cursor(dictionary=True)
         
-        logger.info(f"▶️ Solicitud reanudar slice {slice_id}")
+        # Obtener información del slice
+        cursor.execute("SELECT * FROM slices WHERE id = %s", (slice_id,))
+        slice_data = cursor.fetchone()
         
-        # Llamar al Manager Linux API
-        result = await call_manager_linux("reanudar", slice_id, jwt_token)
-        
-        if result['success']:
-            return SliceActionResponse(
-                success=True,
-                message=f"Slice {slice_id} reanudado exitosamente",
-                slice_id=slice_id,
-                operation="reanudar",
-                manager_linux_response=result['data']
+        if not slice_data:
+            cursor.close()
+            connection.close()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Slice {slice_id} no encontrado"
             )
-        else:
-            return SliceActionResponse(
-                success=False,
-                message=f"Error reanudando slice {slice_id}",
-                slice_id=slice_id,
-                operation="reanudar",
-                error=result['error']
-            )
+        
+        # Validaciones según rol
+        if user['rol'] != 'admin':
+            # Cliente: verificar que sea su slice y esté desplegado
+            if slice_data['usuario'] != user['id']:
+                cursor.close()
+                connection.close()
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="No tiene permisos para eliminar este slice"
+                )
             
+            if slice_data['tipo'] != 'desplegado':
+                cursor.close()
+                connection.close()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Solo se pueden eliminar slices desplegados"
+                )
+        
+        # Extraer zona_despliegue del peticion_json
+        peticion_json = slice_data['peticion_json']
+        if isinstance(peticion_json, str):
+            peticion_json = json.loads(peticion_json)
+        
+        # Buscar zona_despliegue en la raíz o en solicitud_json
+        zona_despliegue = peticion_json.get('zona_despliegue')
+        if not zona_despliegue and 'solicitud_json' in peticion_json:
+            zona_despliegue = peticion_json.get('zona_despliegue', 'linux')
+        if not zona_despliegue:
+            zona_despliegue = 'linux'  # Default
+        
+        logger.info(f"Eliminando slice {slice_id} de zona {zona_despliegue}")
+        
+        # Llamar a drivers para eliminar en el cluster
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                delete_response = await client.post(
+                    f"{DRIVERS_URL}/delete-slice",
+                    json={
+                        "slice_id": slice_id,
+                        "zona_despliegue": zona_despliegue
+                    },
+                    headers={"Authorization": f"Bearer {IMAGE_MANAGER_TOKEN}"}
+                )
+                
+                delete_result = delete_response.json()
+                
+                if delete_response.status_code != 200 or not delete_result.get('success'):
+                    cursor.close()
+                    connection.close()
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=f"Error al eliminar slice en cluster: {delete_result.get('error', 'Unknown error')}"
+                    )
+                
+        except httpx.TimeoutException:
+            cursor.close()
+            connection.close()
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="Timeout al eliminar slice en cluster"
+            )
+        except httpx.ConnectError:
+            cursor.close()
+            connection.close()
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="No se pudo conectar con el servicio de drivers"
+            )
+        
+        # Actualizar estado en BD
+        update_query = "UPDATE slices SET estado = %s WHERE id = %s"
+        cursor.execute(update_query, ('eliminado', slice_id))
+        connection.commit()
+        
+        cursor.close()
+        connection.close()
+        
+        logger.info(f"Slice {slice_id} eliminado exitosamente")
+        
+        return {
+            "success": True,
+            "message": f"Slice {slice_id} eliminado exitosamente",
+            "slice_id": slice_id,
+            "estado": "eliminado"
+        }
+        
+    except HTTPException:
+        raise
+    except Error as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error en base de datos: {str(e)}"
+        )
     except Exception as e:
-        logger.error(f"Error interno reanudando slice {request.slice_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error interno: {str(e)}"
         )
 
-@app.post("/eliminar_slice", response_model=SliceActionResponse)
-async def eliminar_slice(
-    request: SliceActionRequest,
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+@app.post("/slices/pause/{slice_id}")
+async def pause_slice(
+    slice_id: int,
+    user: dict = Depends(get_current_user)
 ):
     """
-    Eliminar un slice usando Manager Linux API
+    Pausar un slice
+    
+    - Cliente: Solo puede pausar sus propios slices con tipo='desplegado'
+    - Admin: Puede pausar cualquier slice sin restricciones
     """
     try:
-        slice_id = request.slice_id
-        jwt_token = credentials.credentials
+        connection = mysql.connector.connect(**DB_CONFIG)
+        cursor = connection.cursor(dictionary=True)
         
-        logger.info(f"🗑️ Solicitud eliminar slice {slice_id}")
+        # Obtener información del slice
+        cursor.execute("SELECT * FROM slices WHERE id = %s", (slice_id,))
+        slice_data = cursor.fetchone()
         
-        # Llamar al Manager Linux API
-        result = await call_manager_linux("eliminar", slice_id, jwt_token)
-        
-        if result['success']:
-            return SliceActionResponse(
-                success=True,
-                message=f"Slice {slice_id} eliminado exitosamente",
-                slice_id=slice_id,
-                operation="eliminar",
-                manager_linux_response=result['data']
+        if not slice_data:
+            cursor.close()
+            connection.close()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Slice {slice_id} no encontrado"
             )
-        else:
-            return SliceActionResponse(
-                success=False,
-                message=f"Error eliminando slice {slice_id}",
-                slice_id=slice_id,
-                operation="eliminar",
-                error=result['error']
-            )
+        
+        # Validaciones según rol
+        if user['rol'] != 'admin':
+            # Cliente: verificar que sea su slice y esté desplegado
+            if slice_data['usuario'] != user['id']:
+                cursor.close()
+                connection.close()
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="No tiene permisos para pausar este slice"
+                )
             
+            if slice_data['tipo'] != 'desplegado':
+                cursor.close()
+                connection.close()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Solo se pueden pausar slices desplegados"
+                )
+        
+        # Extraer zona_despliegue
+        peticion_json = slice_data['peticion_json']
+        if isinstance(peticion_json, str):
+            peticion_json = json.loads(peticion_json)
+        
+        zona_despliegue = peticion_json.get('zona_despliegue', 'linux')
+        
+        logger.info(f"Pausando slice {slice_id} de zona {zona_despliegue}")
+        
+        # Llamar a drivers para pausar en el cluster
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                pause_response = await client.post(
+                    f"{DRIVERS_URL}/pause-slice",
+                    json={
+                        "slice_id": slice_id,
+                        "zona_despliegue": zona_despliegue
+                    },
+                    headers={"Authorization": f"Bearer {IMAGE_MANAGER_TOKEN}"}
+                )
+                
+                pause_result = pause_response.json()
+                
+                if pause_response.status_code != 200 or not pause_result.get('success'):
+                    cursor.close()
+                    connection.close()
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=f"Error al pausar slice en cluster: {pause_result.get('error', 'Unknown error')}"
+                    )
+                
+        except httpx.TimeoutException:
+            cursor.close()
+            connection.close()
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="Timeout al pausar slice en cluster"
+            )
+        except httpx.ConnectError:
+            cursor.close()
+            connection.close()
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="No se pudo conectar con el servicio de drivers"
+            )
+        
+        # Actualizar estado en BD
+        update_query = "UPDATE slices SET estado = %s WHERE id = %s"
+        cursor.execute(update_query, ('pausado', slice_id))
+        connection.commit()
+        
+        cursor.close()
+        connection.close()
+        
+        logger.info(f"Slice {slice_id} pausado exitosamente")
+        
+        return {
+            "success": True,
+            "message": f"Slice {slice_id} pausado exitosamente",
+            "slice_id": slice_id,
+            "estado": "pausado"
+        }
+        
+    except HTTPException:
+        raise
+    except Error as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error en base de datos: {str(e)}"
+        )
     except Exception as e:
-        logger.error(f"Error interno eliminando slice {request.slice_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno: {str(e)}"
+        )
+
+@app.post("/slices/resume/{slice_id}")
+async def resume_slice(
+    slice_id: int,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Reanudar un slice pausado
+    
+    - Cliente: Solo puede reanudar sus propios slices con tipo='desplegado'
+    - Admin: Puede reanudar cualquier slice sin restricciones
+    """
+    try:
+        connection = mysql.connector.connect(**DB_CONFIG)
+        cursor = connection.cursor(dictionary=True)
+        
+        # Obtener información del slice
+        cursor.execute("SELECT * FROM slices WHERE id = %s", (slice_id,))
+        slice_data = cursor.fetchone()
+        
+        if not slice_data:
+            cursor.close()
+            connection.close()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Slice {slice_id} no encontrado"
+            )
+        
+        # Validaciones según rol
+        if user['rol'] != 'admin':
+            # Cliente: verificar que sea su slice y esté desplegado
+            if slice_data['usuario'] != user['id']:
+                cursor.close()
+                connection.close()
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="No tiene permisos para reanudar este slice"
+                )
+            
+            if slice_data['tipo'] != 'desplegado':
+                cursor.close()
+                connection.close()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Solo se pueden reanudar slices desplegados"
+                )
+        
+        # Extraer zona_despliegue
+        peticion_json = slice_data['peticion_json']
+        if isinstance(peticion_json, str):
+            peticion_json = json.loads(peticion_json)
+        
+        zona_despliegue = peticion_json.get('zona_despliegue', 'linux')
+        
+        logger.info(f"Reanudando slice {slice_id} de zona {zona_despliegue}")
+        
+        # Llamar a drivers para reanudar en el cluster
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                resume_response = await client.post(
+                    f"{DRIVERS_URL}/resume-slice",
+                    json={
+                        "slice_id": slice_id,
+                        "zona_despliegue": zona_despliegue
+                    },
+                    headers={"Authorization": f"Bearer {IMAGE_MANAGER_TOKEN}"}
+                )
+                
+                resume_result = resume_response.json()
+                
+                if resume_response.status_code != 200 or not resume_result.get('success'):
+                    cursor.close()
+                    connection.close()
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=f"Error al reanudar slice en cluster: {resume_result.get('error', 'Unknown error')}"
+                    )
+                
+        except httpx.TimeoutException:
+            cursor.close()
+            connection.close()
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="Timeout al reanudar slice en cluster"
+            )
+        except httpx.ConnectError:
+            cursor.close()
+            connection.close()
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="No se pudo conectar con el servicio de drivers"
+            )
+        
+        # Actualizar estado en BD
+        update_query = "UPDATE slices SET estado = %s WHERE id = %s"
+        cursor.execute(update_query, ('corriendo', slice_id))
+        connection.commit()
+        
+        cursor.close()
+        connection.close()
+        
+        logger.info(f"Slice {slice_id} reanudado exitosamente")
+        
+        return {
+            "success": True,
+            "message": f"Slice {slice_id} reanudado exitosamente",
+            "slice_id": slice_id,
+            "estado": "corriendo"
+        }
+        
+    except HTTPException:
+        raise
+    except Error as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error en base de datos: {str(e)}"
+        )
+    except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error interno: {str(e)}"
@@ -754,15 +1242,4 @@ async def eliminar_slice(
 
 if __name__ == "__main__":
     import uvicorn
-    print("🚀 Iniciando Slice Manager API...")
-    print("📍 Puerto: 5900")
-    print("🔗 URL: http://localhost:5900")
-    print("📚 Docs: http://localhost:5900/docs")
-    
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=5900,
-        reload=True,
-        log_level="info"
-    )
+    uvicorn.run(app, host="0.0.0.0", port=5900, workers=2)

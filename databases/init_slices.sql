@@ -13,11 +13,13 @@ USE slices_db;
 CREATE TABLE IF NOT EXISTS slices (
     id INT AUTO_INCREMENT PRIMARY KEY,
     usuario INT NOT NULL,
-    nombre_slice VARCHAR(200) NOT NULL,
-    vms JSON,
-    tipo VARCHAR(50) NOT NULL,
+    nombre_slice VARCHAR(200),
+    tipo VARCHAR(50),
     estado VARCHAR(50),
+    network VARCHAR(15),
     peticion_json JSON,
+    vlans VARCHAR(200),
+    vms JSON,
     timestamp_creacion VARCHAR(50),
     timestamp_despliegue VARCHAR(50)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

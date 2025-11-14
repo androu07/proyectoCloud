@@ -76,6 +76,16 @@ async def root():
         "queue": QUEUE_NAME
     }
 
+@app.get("/health")
+async def health():
+    """Health check endpoint"""
+    return {
+        "status": "OK",
+        "service": "queue_manager",
+        "version": "1.0.0",
+        "queue": QUEUE_NAME
+    }
+
 @app.post("/enqueue-placement")
 async def enqueue_placement(
     request: dict,

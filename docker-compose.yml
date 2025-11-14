@@ -206,6 +206,14 @@ services:
     depends_on:
       - rabbitmq
       - vm_placement_api
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.queue-manager.rule=PathPrefix(`/queue`)"
+      - "traefik.http.routers.queue-manager.entrypoints=websecure"
+      - "traefik.http.routers.queue-manager.tls.certresolver=myresolver"
+      - "traefik.http.services.queue-manager.loadbalancer.server.port=6100"
+      - "traefik.http.middlewares.queue-manager-strip.stripprefix.prefixes=/queue"
+      - "traefik.http.routers.queue-manager.middlewares=queue-manager-strip"
     restart: unless-stopped
 
   # API VM Placement - Asignación de Workers
@@ -218,6 +226,41 @@ services:
       - SERVICE_TOKEN=clavesihna
     networks:
       - red_cloud
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.vm-placement.rule=PathPrefix(`/placement`)"
+      - "traefik.http.routers.vm-placement.entrypoints=websecure"
+      - "traefik.http.routers.vm-placement.tls.certresolver=myresolver"
+      - "traefik.http.services.vm-placement.loadbalancer.server.port=6000"
+      - "traefik.http.middlewares.vm-placement-strip.stripprefix.prefixes=/placement"
+      - "traefik.http.routers.vm-placement.middlewares=vm-placement-strip"
+    restart: unless-stopped
+
+  # Networking & Security - Configuración de red y Grupos de Seguridad
+  net_sec_api:
+    build:
+      context: ./net_sec_api
+      dockerfile: Dockerfile
+    container_name: net_sec_api
+    environment:
+      - SERVICE_TOKEN=clavesihna
+      - DB_HOST=slices_db
+      - DB_PORT=3306
+      - DB_NAME=slices_db
+      - DB_USER=slices_user
+      - DB_PASSWORD=slices_pass123
+    networks:
+      - red_cloud
+    depends_on:
+      - slices_db
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.net-sec.rule=PathPrefix(`/netsec`)"
+      - "traefik.http.routers.net-sec.entrypoints=websecure"
+      - "traefik.http.routers.net-sec.tls.certresolver=myresolver"
+      - "traefik.http.services.net-sec.loadbalancer.server.port=6300"
+      - "traefik.http.middlewares.net-sec-strip.stripprefix.prefixes=/netsec"
+      - "traefik.http.routers.net-sec.middlewares=net-sec-strip"
     restart: unless-stopped
 
   # Drivers - Bypass para despliegue en clusters

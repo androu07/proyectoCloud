@@ -34,6 +34,16 @@ async def root():
         "version": "1.0.0"
     }
 
+@app.get("/health")
+async def health():
+    """Health check endpoint"""
+    return {
+        "status": "OK",
+        "service": "vm_placement_api",
+        "version": "1.0.0",
+        "workers": WORKERS
+    }
+
 @app.post("/assign-workers")
 async def assign_workers(
     request: dict,

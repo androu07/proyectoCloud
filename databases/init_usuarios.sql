@@ -31,8 +31,3 @@ INSERT INTO usuarios (nombre, apellidos, correo, password, rol) VALUES
 -- Password hasheado para 'maria456' usando bcrypt
 INSERT INTO usuarios (nombre, apellidos, correo, password, rol) VALUES 
 ('Maria', 'Garcia', 'maria.garcia@email.com', '$2b$12$oT5pjKLyZvlKax3/oA4GN.PJitxNu/47lxZ2FAn5zK0CnQ6PxuDLu', 'cliente');
-
--- Usuario avanzado: Carlos Rodriguez
--- Password hasheado para 'carlos789' usando bcrypt
-INSERT INTO usuarios (nombre, apellidos, correo, password, rol) VALUES 
-('Carlos', 'Rodriguez', 'carlos.rodriguez@empresa.com', '$2b$12$hph/cZJCNbn8LVRIbY6hk./YWsBVLCfu54poqNZHGUdCwIbzev90m', 'usuario_avanzado');

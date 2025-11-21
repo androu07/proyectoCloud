@@ -1,6 +1,8 @@
 from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, Field, validator, root_validator
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field, validator, root_validator, ValidationError
 import jwt
 import os
 import httpx
@@ -21,6 +23,18 @@ app = FastAPI(
     version="2.0.0",
     description="API mejorada para gestión de slices con validaciones exhaustivas"
 )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Manejador personalizado para errores de validación de Pydantic"""
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content={
+            "success": False,
+            "error": "Formato de solicitud inválido",
+            "message": "El JSON enviado no cumple con el formato esperado"
+        }
+    )
 
 # Configuración
 JWT_SECRET = os.getenv('JWT_SECRET_KEY', 'mi_clave_secreta_super_segura_12345')
@@ -1012,6 +1026,16 @@ async def list_slices(
         cursor.close()
         connection.close()
         
+        # Si no hay slices, retornar mensaje informativo
+        if len(slices) == 0:
+            return {
+                "success": True,
+                "total_slices": 0,
+                "usuario_rol": user['rol'],
+                "message": "No tiene slices desplegados",
+                "slices": []
+            }
+        
         return {
             "success": True,
             "total_slices": len(slices),
@@ -1208,15 +1232,15 @@ async def delete_slice(
                 detail="No se pudo conectar con el servicio de drivers"
             )
         
-        # Actualizar estado en BD
-        update_query = "UPDATE slices SET estado = %s WHERE id = %s"
-        cursor.execute(update_query, ('eliminado', slice_id))
+        # Eliminar slice de la BD
+        delete_query = "DELETE FROM slices WHERE id = %s"
+        cursor.execute(delete_query, (slice_id,))
         connection.commit()
         
         cursor.close()
         connection.close()
         
-        logger.info(f"Slice {slice_id} eliminado exitosamente")
+        logger.info(f"Slice {slice_id} eliminado completamente de la BD")
         
         return {
             "success": True,
@@ -1330,15 +1354,33 @@ async def pause_slice(
                 detail="No se pudo conectar con el servicio de drivers"
             )
         
-        # Actualizar estado en BD
+        # Actualizar estado en BD del slice
         update_query = "UPDATE slices SET estado = %s WHERE id = %s"
         cursor.execute(update_query, ('pausado', slice_id))
+        
+        # Obtener y actualizar el JSON de VMs
+        cursor.execute("SELECT vms FROM slices WHERE id = %s", (slice_id,))
+        vms_data = cursor.fetchone()
+        
+        if vms_data and vms_data['vms']:
+            vms_json = vms_data['vms']
+            if isinstance(vms_json, str):
+                vms_json = json.loads(vms_json)
+            
+            # Actualizar estado de cada VM en el JSON
+            for vm in vms_json:
+                vm['estado'] = 'Pausado'
+            
+            # Guardar el JSON actualizado
+            update_vms_query = "UPDATE slices SET vms = %s WHERE id = %s"
+            cursor.execute(update_vms_query, (json.dumps(vms_json), slice_id))
+        
         connection.commit()
         
         cursor.close()
         connection.close()
         
-        logger.info(f"Slice {slice_id} pausado exitosamente")
+        logger.info(f"Slice {slice_id} y sus VMs pausados exitosamente")
         
         return {
             "success": True,
@@ -1452,15 +1494,33 @@ async def resume_slice(
                 detail="No se pudo conectar con el servicio de drivers"
             )
         
-        # Actualizar estado en BD
+        # Actualizar estado en BD del slice
         update_query = "UPDATE slices SET estado = %s WHERE id = %s"
         cursor.execute(update_query, ('corriendo', slice_id))
+        
+        # Obtener y actualizar el JSON de VMs
+        cursor.execute("SELECT vms FROM slices WHERE id = %s", (slice_id,))
+        vms_data = cursor.fetchone()
+        
+        if vms_data and vms_data['vms']:
+            vms_json = vms_data['vms']
+            if isinstance(vms_json, str):
+                vms_json = json.loads(vms_json)
+            
+            # Actualizar estado de cada VM en el JSON
+            for vm in vms_json:
+                vm['estado'] = 'Corriendo'
+            
+            # Guardar el JSON actualizado
+            update_vms_query = "UPDATE slices SET vms = %s WHERE id = %s"
+            cursor.execute(update_vms_query, (json.dumps(vms_json), slice_id))
+        
         connection.commit()
         
         cursor.close()
         connection.close()
         
-        logger.info(f"Slice {slice_id} reanudado exitosamente")
+        logger.info(f"Slice {slice_id} y sus VMs reanudados exitosamente")
         
         return {
             "success": True,
@@ -2096,31 +2156,33 @@ async def shutdown_slice(
                 detail="No se pudo conectar con el servicio de drivers"
             )
         
-        # Actualizar estado de todas las VMs en BD
-        vms = slice_data.get('vms')
-        if vms and isinstance(vms, str):
-            vms = json.loads(vms)
-        
-        if vms:
-            # Actualizar estado de todas las VMs a "Apagado"
-            for vm in vms:
-                vm['estado'] = 'Apagado'
-            
-            # Guardar VMs actualizadas
-            vms_json_str = json.dumps(vms, ensure_ascii=False)
-            update_vms_query = "UPDATE slices SET vms = %s WHERE id = %s"
-            cursor.execute(update_vms_query, (vms_json_str, slice_id))
-            connection.commit()
-        
         # Actualizar estado del slice en BD
         update_query = "UPDATE slices SET estado = %s WHERE id = %s"
         cursor.execute(update_query, ('apagado', slice_id))
+        
+        # Obtener y actualizar el JSON de VMs
+        cursor.execute("SELECT vms FROM slices WHERE id = %s", (slice_id,))
+        vms_data = cursor.fetchone()
+        
+        if vms_data and vms_data['vms']:
+            vms_json = vms_data['vms']
+            if isinstance(vms_json, str):
+                vms_json = json.loads(vms_json)
+            
+            # Actualizar estado de cada VM en el JSON
+            for vm in vms_json:
+                vm['estado'] = 'Apagado'
+            
+            # Guardar el JSON actualizado
+            update_vms_query = "UPDATE slices SET vms = %s WHERE id = %s"
+            cursor.execute(update_vms_query, (json.dumps(vms_json), slice_id))
+        
         connection.commit()
         
         cursor.close()
         connection.close()
         
-        logger.info(f"Slice {slice_id} apagado exitosamente")
+        logger.info(f"Slice {slice_id} y sus VMs apagados exitosamente")
         
         return {
             "success": True,
@@ -2225,31 +2287,33 @@ async def start_slice(
                 detail="No se pudo conectar con el servicio de drivers"
             )
         
-        # Actualizar estado de todas las VMs en BD
-        vms = slice_data.get('vms')
-        if vms and isinstance(vms, str):
-            vms = json.loads(vms)
-        
-        if vms:
-            # Actualizar estado de todas las VMs a "Corriendo"
-            for vm in vms:
-                vm['estado'] = 'Corriendo'
-            
-            # Guardar VMs actualizadas
-            vms_json_str = json.dumps(vms, ensure_ascii=False)
-            update_vms_query = "UPDATE slices SET vms = %s WHERE id = %s"
-            cursor.execute(update_vms_query, (vms_json_str, slice_id))
-            connection.commit()
-        
         # Actualizar estado del slice en BD
         update_query = "UPDATE slices SET estado = %s WHERE id = %s"
         cursor.execute(update_query, ('corriendo', slice_id))
+        
+        # Obtener y actualizar el JSON de VMs
+        cursor.execute("SELECT vms FROM slices WHERE id = %s", (slice_id,))
+        vms_data = cursor.fetchone()
+        
+        if vms_data and vms_data['vms']:
+            vms_json = vms_data['vms']
+            if isinstance(vms_json, str):
+                vms_json = json.loads(vms_json)
+            
+            # Actualizar estado de cada VM en el JSON
+            for vm in vms_json:
+                vm['estado'] = 'Corriendo'
+            
+            # Guardar el JSON actualizado
+            update_vms_query = "UPDATE slices SET vms = %s WHERE id = %s"
+            cursor.execute(update_vms_query, (json.dumps(vms_json), slice_id))
+        
         connection.commit()
         
         cursor.close()
         connection.close()
         
-        logger.info(f"Slice {slice_id} encendido exitosamente")
+        logger.info(f"Slice {slice_id} y sus VMs encendidos exitosamente")
         
         return {
             "success": True,

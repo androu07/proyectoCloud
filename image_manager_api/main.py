@@ -48,7 +48,7 @@ class ImageResponse(BaseModel):
     nombre_imagen: str = None
     size_gb: float = None
     formato: str = None
-    id_openstack: str = None
+    id_openstack: str = ""
 
 class ImageListItem(BaseModel):
     id: int

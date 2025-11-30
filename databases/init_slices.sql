@@ -16,10 +16,10 @@ CREATE TABLE IF NOT EXISTS slices (
     nombre_slice VARCHAR(200),
     tipo VARCHAR(50),
     estado VARCHAR(50),
-    network VARCHAR(15),
-    peticion_json JSON,
     vlans VARCHAR(200),
     vms JSON,
+    zona_disponibilidad VARCHAR(100),
     timestamp_creacion VARCHAR(50),
-    timestamp_despliegue VARCHAR(50)
+    timestamp_despliegue VARCHAR(50),
+    peticion_json JSON
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

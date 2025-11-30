@@ -1,43 +1,73 @@
 {
   "nombre_slice": "Mi Topología Test",
-  "zona_despliegue": "openstack",
+  "zona_despliegue": "linux",
   "solicitud_json": {
     "id_slice": "",
-    "id_openstack": "",
-    "total_vms": "2",
+    "total_vms": "4",
     "vlans_usadas": "",
-    "id_vlans_openstack": "",
-    "conexiones_vms": "",
+    "conexiones_vms": "vm1-vm4",
     "topologias": [
       {
-        "nombre": "lineal",
-        "cantidad_vms": "2",
+        "nombre": "anillo",
+        "cantidad_vms": "3",
         "vms": [
           {
             "nombre": "vm1",
+            "nombre_ui": "gateway",
+            "cores": "1",
+            "ram": "512M",
+            "almacenamiento": "1G",
+            "id_flavor_openstack": "4e1f4af0-9b1c-45e5-9bc8-3f9cda74bf19",
+            "puerto_vnc": "",
+            "image": "1",
+            "conexiones_vlans": "",
+            "internet": "si",
+            "server": ""
+          },
+          {
+            "nombre": "vm2",
+            "nombre_ui": "worker_hpc_1",
+            "cores": "2",
+            "ram": "1G",
+            "almacenamiento": "2G",
+            "id_flavor_openstack": "4e1f4af0-9b1c-45e5-9bc8-3f9cda74bf19",
+            "puerto_vnc": "",
+            "image": "1",
+            "conexiones_vlans": "",
+            "internet": "no",
+            "server": ""
+          },
+          {
+            "nombre": "vm3",
+            "nombre_ui": "worker_hpc_2",
+            "cores": "2",
+            "ram": "1G",
+            "almacenamiento": "2G",
+            "id_flavor_openstack": "4e1f4af0-9b1c-45e5-9bc8-3f9cda74bf19",
+            "puerto_vnc": "",
+            "image": "1",
+            "conexiones_vlans": "",
+            "internet": "no",
+            "server": ""
+          }
+        ]
+      },
+      {
+        "nombre": "1vm",
+        "cantidad_vms": "1",
+        "vms": [
+          {
+            "nombre": "vm4",
             "nombre_ui": "headnode",
             "cores": "1",
             "ram": "512M",
             "almacenamiento": "1G",
+            "id_flavor_openstack": "4e1f4af0-9b1c-45e5-9bc8-3f9cda74bf19",
             "puerto_vnc": "",
-            "image": "CirrOS Test",
+            "image": "1",
             "conexiones_vlans": "",
             "internet": "si",
-            "server": "",
-            "id_openstack": "" 
-          },
-          {
-            "nombre": "vm2",
-            "nombre_ui": "worker_hpc",
-            "cores": "2",
-            "ram": "1G",
-            "almacenamiento": "2G",
-            "puerto_vnc": "",
-            "image": "CirrOS Test",
-            "conexiones_vlans": "",
-            "internet": "no",
-            "server": "",
-            "id_openstack": "" 
+            "server": ""
           }
         ]
       }

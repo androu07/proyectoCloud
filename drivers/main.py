@@ -7,6 +7,8 @@ import os
 import logging
 import json
 from datetime import datetime
+import mysql.connector
+from mysql.connector import Error
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -23,15 +25,40 @@ SERVICE_TOKEN = os.getenv('SERVICE_TOKEN', 'clavesihna')
 # Orquestadores configurados
 ORCHESTRATORS = {
     'linux': {
-        'host': '192.168.203.2',
+        'host': '192.168.203.1',
         'port': 5805,
-        'base_url': 'http://192.168.203.2:5805'
+        'base_url': 'http://192.168.203.1:5805'
     },
     'openstack': {
         'host': 'TBD',
         'port': 0,
         'base_url': None  # Por implementar
     }
+}
+
+# Security Groups API (headnode Linux)
+SECURITY_API_LINUX = {
+    'host': '192.168.203.1',
+    'port': 5811,
+    'base_url': 'http://192.168.203.1:5811'
+}
+
+# Configuración de BD de slices
+SLICES_DB_CONFIG = {
+    'host': os.getenv('DB_HOST', 'slices_db'),
+    'port': int(os.getenv('DB_PORT', 3306)),
+    'database': os.getenv('DB_NAME', 'slices_db'),
+    'user': os.getenv('DB_USER', 'slices_user'),
+    'password': os.getenv('DB_PASSWORD', 'slices_pass123')
+}
+
+# Configuración de BD de Security Groups
+SG_DB_CONFIG = {
+    'host': os.getenv('SG_DB_HOST', 'security_groups_db'),
+    'port': int(os.getenv('SG_DB_PORT', 3306)),
+    'database': os.getenv('SG_DB_NAME', 'security_groups_db'),
+    'user': os.getenv('SG_DB_USER', 'secgroups_user'),
+    'password': os.getenv('SG_DB_PASSWORD', 'secgroups_pass123')
 }
 
 security = HTTPBearer()
@@ -47,8 +74,7 @@ class DeploySliceResponse(BaseModel):
     message: str
     zone: str
     slice_id: Optional[int] = None
-    deployment_details: Optional[Dict[str, Any]] = None
-    processed_json: Optional[Dict[str, Any]] = None
+    vnc_mapping: Optional[Dict[str, int]] = None  # {vm_name: vnc_port}
     error: Optional[str] = None
 
 class DeleteSliceRequest(BaseModel):
@@ -86,6 +112,74 @@ class OperationResponse(BaseModel):
     workers_results: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
 
+class CreateCustomSGRequest(BaseModel):
+    """Crear security group personalizado"""
+    slice_id: int
+    id_sg: Optional[int] = None  # Si no se provee, se genera automáticamente desde BD
+    zona_despliegue: str
+    workers: Optional[str] = None  # Si no se provee, se obtiene automáticamente de BD
+
+class AddRuleRequest(BaseModel):
+    """Agregar regla a security group"""
+    slice_id: int
+    zona_despliegue: str
+    id_sg: Optional[int] = None  # None = default SG
+    sg_name: Optional[str] = None
+    rule_id: Optional[int] = None  # Si no se provee, se calcula automáticamente desde BD
+    plantilla: Optional[str] = None  # SSH, HTTP, HTTPS, DNS, etc.
+    direction: str  # INPUT/OUTPUT
+    protocol: str = "any"
+    port_range: str = "any"
+    remote_ip_prefix: Optional[str] = None
+    icmp_type: Optional[str] = None
+    icmp_code: Optional[str] = None
+    description: str = ""
+    workers: Optional[str] = None  # Si no se provee, se obtiene automáticamente de BD
+
+class RemoveRuleRequest(BaseModel):
+    """Eliminar regla de security group"""
+    slice_id: int
+    zona_despliegue: str
+    id_sg: Optional[int] = None
+    sg_name: Optional[str] = None
+    rule_id: int
+    direction: Optional[str] = None  # Se obtiene automáticamente de BD si no se provee
+    workers: Optional[str] = None  # Si no se provee, se obtiene automáticamente de BD
+
+class RemoveCustomSGRequest(BaseModel):
+    """Eliminar security group personalizado"""
+    slice_id: int
+    zona_despliegue: str
+    id_sg: int
+    workers: Optional[str] = None  # Si no se provee, se obtiene automáticamente de BD
+
+class RemoveDefaultSGRequest(BaseModel):
+    """Eliminar security group default"""
+    slice_id: int
+    zona_despliegue: str
+    workers: Optional[str] = None  # Si no se provee, se obtiene automáticamente de BD
+
+class SecurityGroupResponse(BaseModel):
+    """Respuesta de operaciones de security groups"""
+    success: bool
+    message: str
+    zone: str
+    slice_id: int
+    error: Optional[str] = None
+
+class SecurityGroupStatusRequest(BaseModel):
+    """Petición para consultar estado de security groups"""
+    slice_id: int
+    zona_despliegue: str
+    workers: Optional[str] = None  # Si no se provee, se obtiene automáticamente de BD
+
+class SecurityGroupStatusResponse(BaseModel):
+    """Respuesta de consulta de estado de security groups"""
+    success: bool
+    slice_id: int
+    workers_status: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
 # Autenticación
 def get_service_auth(credentials: HTTPAuthorizationCredentials = Depends(security)) -> bool:
     """Verificar token de servicio"""
@@ -95,6 +189,453 @@ def get_service_auth(credentials: HTTPAuthorizationCredentials = Depends(securit
             detail="Token de servicio inválido"
         )
     return True
+
+# Funciones de BD
+def get_workers_from_slice(slice_id: int) -> str:
+    """
+    Obtener workers de un slice desde la BD
+    
+    Args:
+        slice_id: ID del slice
+    
+    Returns:
+        String con workers separados por ';' (ej: 'worker2;worker3')
+    
+    Raises:
+        HTTPException: Si no se encuentra el slice o no tiene VMs desplegadas
+    """
+    connection = None
+    cursor = None
+    
+    try:
+        connection = mysql.connector.connect(**SLICES_DB_CONFIG)
+        cursor = connection.cursor(dictionary=True)
+        
+        query = "SELECT vms FROM slices WHERE id = %s"
+        cursor.execute(query, (slice_id,))
+        result = cursor.fetchone()
+        
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Slice {slice_id} no encontrado en BD"
+            )
+        
+        vms_json = result.get('vms')
+        if not vms_json:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Slice {slice_id} no tiene VMs desplegadas aún"
+            )
+        
+        # Parsear JSON de VMs
+        vms = json.loads(vms_json)
+        
+        if not isinstance(vms, list) or len(vms) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Slice {slice_id} no tiene VMs válidas"
+            )
+        
+        # Extraer servers únicos
+        servers = set()
+        for vm in vms:
+            server = vm.get('server')
+            if server:
+                servers.add(server)
+        
+        if not servers:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"No se encontraron workers asignados al slice {slice_id}"
+            )
+        
+        # Convertir a formato 'worker1;worker2;worker3'
+        workers_str = ';'.join(sorted(servers))
+        logger.info(f"Workers obtenidos del slice {slice_id}: {workers_str}")
+        
+        return workers_str
+        
+    except HTTPException:
+        raise
+    except Error as e:
+        logger.error(f"Error de BD al obtener workers del slice {slice_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error consultando BD: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"Error al obtener workers del slice {slice_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno: {str(e)}"
+        )
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+# Funciones de BD - Security Groups
+def create_sg_in_db(slice_id: int, description: str = "") -> int:
+    """
+    Crear Security Group en BD y obtener su ID auto-generado
+    
+    Args:
+        slice_id: ID del slice
+        description: Descripción del SG
+    
+    Returns:
+        ID del SG generado por AUTO_INCREMENT
+    """
+    connection = None
+    cursor = None
+    
+    try:
+        connection = mysql.connector.connect(**SG_DB_CONFIG)
+        cursor = connection.cursor()
+        
+        # Reglas por defecto (sync con cluster Linux)
+        default_rules = [
+            {
+                "id": 1,
+                "direction": "egress",
+                "ether_type": "IPv4",
+                "protocol": "any",
+                "port_range": "any",
+                "remote_ip_prefix": "0.0.0.0/0",
+                "remote_security_group": None,
+                "description": "Permitir todo tráfico saliente IPv4"
+            },
+            {
+                "id": 2,
+                "direction": "ingress",
+                "ether_type": "IPv4",
+                "protocol": "any",
+                "port_range": "any",
+                "remote_ip_prefix": None,
+                "remote_security_group": "default",
+                "description": "Permitir desde mismo grupo IPv4"
+            }
+        ]
+        
+        rules_json = json.dumps(default_rules)
+        
+        # Insertar sin especificar 'name' aún (lo actualizaremos después con el ID)
+        query = """
+        INSERT INTO security_groups (slice_id, name, description, rules, is_default)
+        VALUES (%s, %s, %s, %s, %s)
+        """
+        
+        # Nombre temporal, lo actualizaremos con el ID real
+        cursor.execute(query, (slice_id, 'temp', description, rules_json, False))
+        connection.commit()
+        
+        # Obtener ID generado
+        sg_id = cursor.lastrowid
+        
+        # Actualizar nombre con el ID real: SG_5, SG_10, etc.
+        sg_name = f"SG_{sg_id}"
+        update_query = "UPDATE security_groups SET name = %s WHERE id = %s"
+        cursor.execute(update_query, (sg_name, sg_id))
+        connection.commit()
+        
+        logger.info(f"SG '{sg_name}' (ID {sg_id}) creado en BD para slice {slice_id}")
+        
+        return sg_id
+        
+    except Error as e:
+        logger.error(f"Error creando SG en BD: {str(e)}")
+        if connection:
+            connection.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error en BD Security Groups: {str(e)}"
+        )
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+def get_next_rule_id(slice_id: int, sg_name: str) -> int:
+    """
+    Calcular el siguiente rule_id disponible para un SG
+    
+    Args:
+        slice_id: ID del slice
+        sg_name: Nombre del SG (ej: 'SG_5', 'default')
+    
+    Returns:
+        Siguiente ID disponible (max + 1)
+    """
+    connection = None
+    cursor = None
+    
+    try:
+        connection = mysql.connector.connect(**SG_DB_CONFIG)
+        cursor = connection.cursor(dictionary=True)
+        
+        query = "SELECT rules FROM security_groups WHERE slice_id = %s AND name = %s"
+        cursor.execute(query, (slice_id, sg_name))
+        result = cursor.fetchone()
+        
+        if not result:
+            # SG no existe, retornar 1
+            return 1
+        
+        rules = json.loads(result['rules']) if result['rules'] else []
+        
+        if not rules:
+            return 1
+        
+        # Obtener el ID más alto
+        max_id = max([rule['id'] for rule in rules])
+        return max_id + 1
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo next_rule_id: {str(e)}")
+        return 1  # Fallback
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+def add_rule_to_db(slice_id: int, sg_name: str, rule: Dict[str, Any]):
+    """
+    Agregar regla a un SG en BD
+    
+    Args:
+        slice_id: ID del slice
+        sg_name: Nombre del SG
+        rule: Dict con datos de la regla
+    """
+    connection = None
+    cursor = None
+    
+    try:
+        connection = mysql.connector.connect(**SG_DB_CONFIG)
+        cursor = connection.cursor(dictionary=True)
+        
+        query = "SELECT rules FROM security_groups WHERE slice_id = %s AND name = %s"
+        cursor.execute(query, (slice_id, sg_name))
+        result = cursor.fetchone()
+        
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Security Group '{sg_name}' no encontrado para slice {slice_id}"
+            )
+        
+        rules = json.loads(result['rules']) if result['rules'] else []
+        rules.append(rule)
+        rules_json = json.dumps(rules)
+        
+        update_query = "UPDATE security_groups SET rules = %s WHERE slice_id = %s AND name = %s"
+        cursor.execute(update_query, (rules_json, slice_id, sg_name))
+        connection.commit()
+        
+        logger.info(f"Regla {rule['id']} agregada a SG '{sg_name}' en BD")
+        
+    except HTTPException:
+        raise
+    except Error as e:
+        logger.error(f"Error agregando regla en BD: {str(e)}")
+        if connection:
+            connection.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error en BD: {str(e)}"
+        )
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+def delete_sg_from_db(slice_id: int, sg_id: int):
+    """
+    Eliminar Security Group de BD
+    
+    Args:
+        slice_id: ID del slice
+        sg_id: ID del SG (de la tabla)
+    """
+    connection = None
+    cursor = None
+    
+    try:
+        connection = mysql.connector.connect(**SG_DB_CONFIG)
+        cursor = connection.cursor()
+        
+        # Obtener nombre del SG antes de eliminar
+        query_name = "SELECT name FROM security_groups WHERE slice_id = %s AND id = %s"
+        cursor.execute(query_name, (slice_id, sg_id))
+        result = cursor.fetchone()
+        sg_name = result[0] if result else f"SG_{sg_id}"
+        
+        query = "DELETE FROM security_groups WHERE slice_id = %s AND id = %s"
+        cursor.execute(query, (slice_id, sg_id))
+        connection.commit()
+        
+        logger.info(f"SG '{sg_name}' (ID {sg_id}) eliminado de BD para slice {slice_id}")
+        
+        return sg_name
+        
+    except Error as e:
+        logger.error(f"Error eliminando SG de BD: {str(e)}")
+        if connection:
+            connection.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error en BD: {str(e)}"
+        )
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+def get_rule_direction_from_db(slice_id: int, sg_name: str, rule_id: int) -> Optional[str]:
+    """
+    Obtener el campo direction de una regla específica desde la BD
+    
+    Args:
+        slice_id: ID del slice
+        sg_name: Nombre del SG (ej: 'default', 'SG_5')
+        rule_id: ID de la regla
+        
+    Returns:
+        direction de la regla ('INPUT' o 'OUTPUT') o None si no se encuentra
+    """
+    connection = None
+    cursor = None
+    
+    try:
+        connection = mysql.connector.connect(**SG_DB_CONFIG)
+        cursor = connection.cursor(dictionary=True)
+        
+        query = "SELECT rules FROM security_groups WHERE slice_id = %s AND name = %s"
+        cursor.execute(query, (slice_id, sg_name))
+        result = cursor.fetchone()
+        
+        if not result:
+            logger.warning(f"SG '{sg_name}' no encontrado en BD (slice {slice_id})")
+            return None
+        
+        rules = json.loads(result['rules']) if result['rules'] else []
+        
+        # Buscar la regla específica
+        for rule in rules:
+            if rule['id'] == rule_id:
+                return rule.get('direction', 'INPUT')
+        
+        logger.warning(f"Regla {rule_id} no encontrada en SG '{sg_name}'")
+        return None
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo direction de BD: {str(e)}")
+        return None
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+def remove_rule_from_db(slice_id: int, sg_name: str, rule_id: int):
+    """
+    Eliminar una regla del JSON de reglas de un SG en BD
+    
+    Args:
+        slice_id: ID del slice
+        sg_name: Nombre del SG (ej: 'default', 'SG_5')
+        rule_id: ID de la regla a eliminar
+    """
+    connection = None
+    cursor = None
+    
+    try:
+        connection = mysql.connector.connect(**SG_DB_CONFIG)
+        cursor = connection.cursor(dictionary=True)
+        
+        # Obtener reglas actuales
+        query = "SELECT rules FROM security_groups WHERE slice_id = %s AND name = %s"
+        cursor.execute(query, (slice_id, sg_name))
+        result = cursor.fetchone()
+        
+        if not result:
+            logger.warning(f"SG '{sg_name}' no encontrado en BD (slice {slice_id})")
+            return None
+        
+        rules = json.loads(result['rules']) if result['rules'] else []
+        
+        # Buscar la regla a eliminar para obtener su direction
+        rule_to_remove = None
+        for r in rules:
+            if r['id'] == rule_id:
+                rule_to_remove = r
+                break
+        
+        if not rule_to_remove:
+            logger.warning(f"Regla {rule_id} no encontrada en SG '{sg_name}'")
+            return None
+        
+        # Obtener direction de la regla
+        direction = rule_to_remove.get('direction', 'INPUT')
+        
+        # Filtrar la regla a eliminar
+        rules_filtered = [r for r in rules if r['id'] != rule_id]
+        
+        # Actualizar JSON de reglas
+        rules_json = json.dumps(rules_filtered)
+        update_query = "UPDATE security_groups SET rules = %s WHERE slice_id = %s AND name = %s"
+        cursor.execute(update_query, (rules_json, slice_id, sg_name))
+        connection.commit()
+        
+        logger.info(f"Regla {rule_id} (direction={direction}) eliminada de SG '{sg_name}' en BD")
+        return direction
+        
+    except Exception as e:
+        logger.error(f"Error eliminando regla de BD: {str(e)}")
+        if connection:
+            connection.rollback()
+        return None
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+def delete_default_sg_from_db(slice_id: int):
+    """
+    Eliminar el SG default de un slice de la BD
+    
+    Args:
+        slice_id: ID del slice
+    """
+    connection = None
+    cursor = None
+    
+    try:
+        connection = mysql.connector.connect(**SG_DB_CONFIG)
+        cursor = connection.cursor()
+        
+        query = "DELETE FROM security_groups WHERE slice_id = %s AND is_default = TRUE"
+        cursor.execute(query, (slice_id,))
+        connection.commit()
+        
+        logger.info(f"SG default eliminado de BD (slice {slice_id})")
+        
+    except Exception as e:
+        logger.error(f"Error eliminando SG default de BD: {str(e)}")
+        if connection:
+            connection.rollback()
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
 
 # Funciones auxiliares
 async def call_linux_orchestrator(endpoint: str, method: str = "POST", 
@@ -160,11 +701,77 @@ async def call_linux_orchestrator(endpoint: str, method: str = "POST",
             'message': f'Error interno: {str(e)}'
         }
 
+async def call_security_api_linux(endpoint: str, method: str = "POST",
+                                   payload: Optional[Dict] = None,
+                                   timeout: int = 30) -> Dict[str, Any]:
+    """
+    Llamada a la Security Groups API Linux (security_api.py)
+    
+    Args:
+        endpoint: Endpoint de la API (ej: /create-custom, /add-rule)
+        method: Método HTTP (POST, GET)
+        payload: Datos a enviar
+        timeout: Timeout en segundos
+    
+    Returns:
+        Dict con resultado de la llamada
+    """
+    try:
+        api = SECURITY_API_LINUX
+        url = f"{api['base_url']}{endpoint}"
+        
+        logger.info(f"Llamando a Security Groups API: {url}")
+        
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            if method == "POST":
+                response = await client.post(url, json=payload)
+            elif method == "GET":
+                response = await client.get(url)
+            else:
+                return {'success': False, 'error': f'Método {method} no soportado'}
+        
+        if response.status_code == 200:
+            return {
+                'success': True,
+                'status_code': 200,
+                'data': response.json()
+            }
+        else:
+            logger.error(f"Error de Security API: {response.status_code} - {response.text}")
+            return {
+                'success': False,
+                'status_code': response.status_code,
+                'error': response.text
+            }
+    
+    except httpx.TimeoutException:
+        logger.error("Timeout conectando a Security Groups API")
+        return {
+            'success': False,
+            'error': 'timeout',
+            'message': 'Timeout conectando con Security Groups API'
+        }
+    except httpx.ConnectError:
+        logger.error("Error de conexión a Security Groups API")
+        return {
+            'success': False,
+            'error': 'connection_error',
+            'message': f'No se pudo conectar con Security Groups API en {api["base_url"]}'
+        }
+    except Exception as e:
+        logger.error(f"Error interno llamando a Security API: {str(e)}")
+        return {
+            'success': False,
+            'error': 'internal_error',
+            'message': f'Error interno: {str(e)}'
+        }
+
 async def deploy_to_linux(json_config: Dict[str, Any]) -> Dict[str, Any]:
     """
     Despliega un slice en el cluster Linux
     
     Llama al endpoint /desplegar-slice del orquestador_api.py
+    Ahora el orquestador devuelve solo: {success, message, slice_id, vnc_mapping, error}
     """
     logger.info(f"Iniciando despliegue en cluster Linux")
     
@@ -188,24 +795,17 @@ async def deploy_to_linux(json_config: Dict[str, Any]) -> Dict[str, Any]:
     if response_data.get('success'):
         logger.info(f"Despliegue exitoso en cluster Linux")
         
-        # LOG: Imprimir toda la respuesta del orquestador para debugging
-        logger.info(f"RESPUESTA COMPLETA DEL ORQUESTADOR:")
+        # LOG: Imprimir respuesta del orquestador
+        logger.info(f"RESPUESTA DEL ORQUESTADOR:")
         logger.info(json.dumps(response_data, indent=2, ensure_ascii=False))
         
-        # Extraer deployment_details y processed_config
-        deployment_details = response_data.get('deployment_details', {})
-        
-        # El orquestador devuelve el JSON procesado en 'processed_config' (nivel raíz)
-        processed_json = response_data.get('processed_config', json_config)
-        
-        logger.info(f"JSON PROCESADO EXTRAÍDO (processed_config):")
-        logger.info(json.dumps(processed_json, indent=2, ensure_ascii=False))
+        # El orquestador ahora solo devuelve vnc_mapping
+        vnc_mapping = response_data.get('vnc_mapping', {})
         
         return {
             'success': True,
             'message': response_data.get('message', 'Despliegue exitoso'),
-            'deployment_details': deployment_details,
-            'processed_json': processed_json
+            'vnc_mapping': vnc_mapping
         }
     else:
         logger.error(f"Error en despliegue Linux: {response_data.get('message')}")
@@ -213,7 +813,6 @@ async def deploy_to_linux(json_config: Dict[str, Any]) -> Dict[str, Any]:
             'success': False,
             'message': 'Error durante el despliegue en cluster Linux',
             'error': response_data.get('message', 'Unknown deployment error'),
-            'deployment_details': response_data.get('deployment_details'),
             'connection_failed': False
         }
 
@@ -505,9 +1104,8 @@ async def deploy_slice(
                 detail="El campo 'zona_despliegue' es requerido"
             )
         
-        # Extraer slice_id
-        solicitud_json = json_config.get('solicitud_json', {})
-        slice_id_str = solicitud_json.get('id_slice')
+        # Extraer slice_id (formato simplificado: id_slice directo en json_config)
+        slice_id_str = json_config.get('id_slice')
         
         try:
             slice_id = int(slice_id_str) if slice_id_str else None
@@ -517,7 +1115,7 @@ async def deploy_slice(
         if not slice_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="El campo 'solicitud_json.id_slice' es requerido"
+                detail="El campo 'id_slice' es requerido"
             )
         
         logger.info(f"Procesando despliegue de slice {slice_id} en zona '{zona_despliegue}'")
@@ -559,31 +1157,15 @@ async def deploy_slice(
             )
         
         elif not result['success']:
-            # Error durante el despliegue → ejecutar rollback
-            logger.error(f"Error en despliegue, ejecutando rollback para slice {slice_id}")
-            
-            # Intentar eliminar slice
-            if zona_despliegue == 'linux':
-                delete_result = await delete_from_linux(slice_id)
-            else:
-                delete_result = {'success': False, 'message': 'Rollback no implementado para esta zona'}
-            
-            error_message = f"Problema al desplegar slice {slice_id}. "
-            if delete_result.get('success'):
-                error_message += "Rollback ejecutado exitosamente (recursos limpiados)."
-            else:
-                error_message += f"Advertencia: Rollback falló - {delete_result.get('message')}"
+            # Error durante el despliegue (orquestador ya hizo rollback)
+            logger.error(f"Error en despliegue de slice {slice_id}: {result.get('error')}")
             
             return DeploySliceResponse(
                 success=False,
-                message=error_message,
+                message=f"Error al desplegar slice {slice_id}",
                 zone=zona_despliegue,
                 slice_id=slice_id,
-                deployment_details={
-                    'deployment_error': result.get('error'),
-                    'rollback_executed': delete_result.get('success', False),
-                    'rollback_details': delete_result
-                },
+                deployment_details=result.get('deployment_details'),
                 error=result.get('error', 'Deployment failed')
             )
         
@@ -596,8 +1178,7 @@ async def deploy_slice(
                 message=f"Slice {slice_id} desplegado exitosamente en {zona_despliegue}",
                 zone=zona_despliegue,
                 slice_id=slice_id,
-                deployment_details=result.get('deployment_details'),
-                processed_json=result.get('processed_json')
+                vnc_mapping=result.get('vnc_mapping', {})
             )
         
     except HTTPException:
@@ -1247,6 +1828,631 @@ async def start_slice(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error interno del servidor: {str(e)}"
+        )
+
+# =============================================================================
+# ENDPOINTS DE SECURITY GROUPS
+# =============================================================================
+
+@app.get("/security-groups-linux/templates")
+async def list_security_group_templates(
+    zona_despliegue: str = "linux",
+    authorized: bool = Depends(get_service_auth)
+):
+    """
+    Listar plantillas de reglas disponibles para cluster Linux
+    
+    Args:
+        zona_despliegue: Zona ('linux' o 'openstack')
+    
+    Returns:
+        Diccionario con todas las plantillas disponibles
+    """
+    try:
+        zona = zona_despliegue.lower()
+        
+        logger.info(f"Listando plantillas de security groups para zona '{zona}'")
+        
+        if zona not in ['linux', 'openstack']:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Zona '{zona}' no soportada. Debe ser 'linux' u 'openstack'"
+            )
+        
+        if zona == 'linux':
+            result = await call_security_api_linux(
+                "/templates",
+                method="GET",
+                payload=None
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail="Security Groups en OpenStack no implementado aún"
+            )
+        
+        if not result['success']:
+            raise HTTPException(
+                status_code=result.get('status_code', 500),
+                detail=result.get('error', 'Error obteniendo plantillas')
+            )
+        
+        return result.get('data', {})
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error en list-security-group-templates: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno: {str(e)}"
+        )
+
+@app.post("/security-groups-linux/status", response_model=SecurityGroupStatusResponse)
+async def get_security_group_status(
+    request: SecurityGroupStatusRequest,
+    authorized: bool = Depends(get_service_auth)
+):
+    """
+    Consultar estado de security groups en workers específicos del cluster Linux
+    
+    Args:
+        slice_id: ID del slice
+        zona_despliegue: Zona del slice
+        workers: Workers separados por ';' (opcional, se obtiene automáticamente de BD)
+    
+    Returns:
+        Estado de security groups en cada worker
+    """
+    try:
+        zona = request.zona_despliegue.lower()
+        
+        logger.info(f"Consultando estado de security groups del slice {request.slice_id} en zona '{zona}'")
+        
+        if zona not in ['linux', 'openstack']:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Zona '{zona}' no soportada"
+            )
+        
+        # Obtener workers automáticamente si no se proporcionaron
+        workers = request.workers
+        if not workers:
+            workers = get_workers_from_slice(request.slice_id)
+            logger.info(f"Workers obtenidos automáticamente: {workers}")
+        
+        if zona == 'linux':
+            result = await call_security_api_linux(
+                "/status",
+                method="POST",
+                payload={
+                    "slice_id": request.slice_id,
+                    "workers": workers
+                }
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail="Security Groups en OpenStack no implementado aún"
+            )
+        
+        if not result['success']:
+            return SecurityGroupStatusResponse(
+                success=False,
+                slice_id=request.slice_id,
+                error=result.get('error', 'Error consultando estado')
+            )
+        
+        data = result.get('data', {})
+        return SecurityGroupStatusResponse(
+            success=data.get('success', False),
+            slice_id=request.slice_id,
+            workers_status=data.get('workers_status')
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error en get-security-group-status: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno: {str(e)}"
+        )
+
+@app.post("/security-groups-linux/create-custom", response_model=SecurityGroupResponse)
+async def create_custom_security_group(
+    request: CreateCustomSGRequest,
+    authorized: bool = Depends(get_service_auth)
+):
+    """
+    Crear security group personalizado en workers específicos del cluster Linux
+    
+    FLUJO NUEVO:
+    1. Crear entrada en BD → obtener ID auto-generado
+    2. Usar ese ID para crear SG en workers (security_api)
+    3. Si falla, eliminar de BD (rollback)
+    
+    Args:
+        slice_id: ID del slice
+        id_sg: (Opcional) ID del SG, si no se provee se genera automáticamente
+        zona_despliegue: Zona donde está el slice
+        workers: (Opcional) Workers, se auto-detectan si no se proveen
+    """
+    try:
+        zona = request.zona_despliegue.lower()
+        
+        if zona not in ['linux', 'openstack']:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Zona '{zona}' no soportada. Debe ser 'linux' u 'openstack'"
+            )
+        
+        # PASO 1: Crear en BD y obtener ID auto-generado
+        if request.id_sg:
+            # Usuario especificó ID manualmente (legacy)
+            id_sg = request.id_sg
+            logger.warning(f"ID manual {id_sg} especificado (legacy mode)")
+        else:
+            # Generar ID desde BD (modo recomendado)
+            id_sg = create_sg_in_db(
+                slice_id=request.slice_id,
+                description=f"Security Group personalizado para slice {request.slice_id}"
+            )
+            logger.info(f"ID {id_sg} generado automáticamente desde BD")
+        
+        # Obtener workers automáticamente si no se proporcionaron
+        workers = request.workers
+        if not workers:
+            workers = get_workers_from_slice(request.slice_id)
+            logger.info(f"Workers obtenidos automáticamente: {workers}")
+        
+        # PASO 2: Crear SG en workers del cluster usando security_api
+        if zona == 'linux':
+            result = await call_security_api_linux(
+                "/create-custom",
+                method="POST",
+                payload={
+                    "slice_id": request.slice_id,
+                    "id_sg": id_sg,  # Usar ID generado por BD
+                    "workers": workers
+                }
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail="Security Groups en OpenStack no implementado aún"
+            )
+        
+        # PASO 3: Si falló en workers, hacer rollback en BD
+        if not result['success']:
+            if not request.id_sg:  # Solo rollback si fue auto-generado
+                delete_sg_from_db(request.slice_id, id_sg)
+                logger.warning(f"Rollback: SG {id_sg} eliminado de BD tras fallo en workers")
+            
+            return SecurityGroupResponse(
+                success=False,
+                message=result.get('message', 'Error creando security group'),
+                zone=zona,
+                slice_id=request.slice_id,
+                error=result.get('error')
+            )
+        
+        data = result.get('data', {})
+        return SecurityGroupResponse(
+            success=data.get('success', False),
+            message=data.get('message', f'Security Group {id_sg} creado (ID BD: {id_sg})'),
+            zone=zona,
+            slice_id=request.slice_id
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error en create-custom-security-group: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno: {str(e)}"
+        )
+
+@app.post("/security-groups-linux/add-rule", response_model=SecurityGroupResponse)
+async def add_security_group_rule(
+    request: AddRuleRequest,
+    authorized: bool = Depends(get_service_auth)
+):
+    """
+    Agregar regla a un security group del cluster Linux
+    
+    FLUJO NUEVO:
+    1. Determinar nombre del SG (default o SG_{id})
+    2. Consultar BD para obtener next_rule_id automáticamente
+    3. Agregar regla en workers (security_api)
+    4. Si exitoso, actualizar BD con la nueva regla
+    
+    Args:
+        slice_id: ID del slice
+        zona_despliegue: Zona del slice
+        id_sg: ID del SG personalizado (None = default)
+        sg_name: Nombre del SG (alternativa a id_sg)
+        rule_id: (Opcional) ID de la regla, se calcula automáticamente si no se provee
+        plantilla: Plantilla predefinida (SSH, HTTP, HTTPS, DNS, etc.)
+        direction: Dirección (INPUT/OUTPUT)
+        protocol, port_range, etc.
+        workers: (Opcional) Workers, se auto-detectan
+    """
+    try:
+        zona = request.zona_despliegue.lower()
+        
+        if zona not in ['linux', 'openstack']:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Zona '{zona}' no soportada"
+            )
+        
+        # PASO 1: Determinar nombre del SG
+        if request.sg_name:
+            sg_name = request.sg_name
+        elif request.id_sg is not None:
+            sg_name = f"SG_{request.id_sg}"
+        else:
+            sg_name = "default"  # SG default del slice
+        
+        # PASO 2: Obtener rule_id automáticamente si no se proporcionó
+        if request.rule_id:
+            rule_id = request.rule_id
+            logger.warning(f"rule_id manual {rule_id} especificado (legacy mode)")
+        else:
+            rule_id = get_next_rule_id(request.slice_id, sg_name)
+            logger.info(f"rule_id {rule_id} generado automáticamente para SG '{sg_name}'")
+        
+        # Obtener workers automáticamente si no se proporcionaron
+        workers = request.workers
+        if not workers:
+            workers = get_workers_from_slice(request.slice_id)
+            logger.info(f"Workers obtenidos automáticamente: {workers}")
+        
+        # PASO 3: Agregar regla en workers
+        if zona == 'linux':
+            payload = {
+                "slice_id": request.slice_id,
+                "rule_id": rule_id,  # Usar rule_id generado/calculado
+                "direction": request.direction,
+                "protocol": request.protocol,
+                "port_range": request.port_range,
+                "description": request.description,
+                "workers": workers
+            }
+            
+            # Campos opcionales
+            if request.id_sg is not None:
+                payload["id_sg"] = request.id_sg
+            if request.sg_name:
+                payload["sg_name"] = request.sg_name
+            if request.plantilla:
+                payload["plantilla"] = request.plantilla
+            if request.remote_ip_prefix:
+                payload["remote_ip_prefix"] = request.remote_ip_prefix
+            if request.icmp_type:
+                payload["icmp_type"] = request.icmp_type
+            if request.icmp_code:
+                payload["icmp_code"] = request.icmp_code
+            
+            result = await call_security_api_linux(
+                "/add-rule",
+                method="POST",
+                payload=payload
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail="Security Groups en OpenStack no implementado aún"
+            )
+        
+        if not result['success']:
+            return SecurityGroupResponse(
+                success=False,
+                message=result.get('message', 'Error agregando regla'),
+                zone=zona,
+                slice_id=request.slice_id,
+                error=result.get('error')
+            )
+        
+        # PASO 4: Si exitoso en workers, actualizar BD
+        rule_data = {
+            "id": rule_id,
+            "direction": request.direction.lower(),
+            "ether_type": "IPv4",  # Default
+            "protocol": request.protocol,
+            "port_range": request.port_range,
+            "remote_ip_prefix": request.remote_ip_prefix,
+            "remote_security_group": None,
+            "description": request.description
+        }
+        
+        add_rule_to_db(request.slice_id, sg_name, rule_data)
+        
+        data = result.get('data', {})
+        return SecurityGroupResponse(
+            success=data.get('success', False),
+            message=data.get('message', f'Regla {rule_id} agregada (BD actualizada)'),
+            zone=zona,
+            slice_id=request.slice_id
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error en add-security-group-rule: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno: {str(e)}"
+        )
+
+@app.post("/security-groups-linux/remove-rule", response_model=SecurityGroupResponse)
+async def remove_security_group_rule(
+    request: RemoveRuleRequest,
+    authorized: bool = Depends(get_service_auth)
+):
+    """
+    Eliminar regla de un security group del cluster Linux
+    
+    El sistema busca automáticamente la regla en ambas cadenas (INPUT y OUTPUT).
+    
+    Args:
+        slice_id: ID del slice
+        zona_despliegue: Zona del slice
+        id_sg: ID del SG personalizado (None = default)
+        sg_name: Nombre del SG
+        rule_id: ID de la regla a eliminar
+        workers: Workers donde eliminar (opcional, se obtiene automáticamente de BD)
+    """
+    try:
+        zona = request.zona_despliegue.lower()
+        
+        logger.info(f"Eliminando regla {request.rule_id} del slice {request.slice_id} en zona '{zona}'")
+        
+        if zona not in ['linux', 'openstack']:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Zona '{zona}' no soportada"
+            )
+        
+        # Obtener workers automáticamente si no se proporcionaron
+        workers = request.workers
+        if not workers:
+            workers = get_workers_from_slice(request.slice_id)
+            logger.info(f"Workers obtenidos automáticamente: {workers}")
+        
+        # Obtener direction de la BD si no se proporcionó
+        direction = request.direction
+        if not direction:
+            # Determinar nombre del SG para consultar BD
+            if request.sg_name:
+                sg_name = request.sg_name
+            elif request.id_sg is not None:
+                sg_name = f"SG_{request.id_sg}"
+            else:
+                sg_name = "default"
+            
+            # Consultar BD para obtener direction
+            direction = get_rule_direction_from_db(request.slice_id, sg_name, request.rule_id)
+            if direction:
+                logger.info(f"Direction '{direction}' obtenida automáticamente de BD")
+            else:
+                direction = "INPUT"  # Fallback por si no se encuentra
+                logger.warning(f"Direction no encontrada en BD, usando fallback: {direction}")
+        
+        if zona == 'linux':
+            payload = {
+                "slice_id": request.slice_id,
+                "rule_id": request.rule_id,
+                "direction": direction,  # Enviar direction desde BD
+                "workers": workers
+            }
+            
+            if request.id_sg is not None:
+                payload["id_sg"] = request.id_sg
+            if request.sg_name:
+                payload["sg_name"] = request.sg_name
+            
+            result = await call_security_api_linux(
+                "/remove-rule",
+                method="POST",
+                payload=payload
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail="Security Groups en OpenStack no implementado aún"
+            )
+        
+        if not result['success']:
+            return SecurityGroupResponse(
+                success=False,
+                message=result.get('message', 'Error eliminando regla'),
+                zone=zona,
+                slice_id=request.slice_id,
+                error=result.get('error')
+            )
+        
+        # Si exitoso en workers, sincronizar BD
+        # Determinar nombre del SG
+        if request.sg_name:
+            sg_name = request.sg_name
+        elif request.id_sg is not None:
+            sg_name = f"SG_{request.id_sg}"
+        else:
+            sg_name = "default"
+        
+        remove_rule_from_db(request.slice_id, sg_name, request.rule_id)
+        
+        data = result.get('data', {})
+        return SecurityGroupResponse(
+            success=data.get('success', False),
+            message=data.get('message', f'Regla {request.rule_id} eliminada (BD actualizada)'),
+            zone=zona,
+            slice_id=request.slice_id
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error en remove-security-group-rule: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno: {str(e)}"
+        )
+
+@app.post("/security-groups-linux/remove-custom", response_model=SecurityGroupResponse)
+async def remove_custom_security_group(
+    request: RemoveCustomSGRequest,
+    authorized: bool = Depends(get_service_auth)
+):
+    """
+    Eliminar security group personalizado del cluster Linux
+    
+    Args:
+        slice_id: ID del slice
+        zona_despliegue: Zona del slice
+        id_sg: ID del security group a eliminar
+        workers: Workers donde eliminar (opcional, se obtiene automáticamente de BD)
+    """
+    try:
+        zona = request.zona_despliegue.lower()
+        
+        logger.info(f"Eliminando Security Group {request.id_sg} del slice {request.slice_id} en zona '{zona}'")
+        
+        if zona not in ['linux', 'openstack']:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Zona '{zona}' no soportada"
+            )
+        
+        # Obtener workers automáticamente si no se proporcionaron
+        workers = request.workers
+        if not workers:
+            workers = get_workers_from_slice(request.slice_id)
+            logger.info(f"Workers obtenidos automáticamente: {workers}")
+        
+        if zona == 'linux':
+            result = await call_security_api_linux(
+                "/remove-custom",
+                method="POST",
+                payload={
+                    "slice_id": request.slice_id,
+                    "id_sg": request.id_sg,
+                    "workers": workers
+                }
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail="Security Groups en OpenStack no implementado aún"
+            )
+        
+        if not result['success']:
+            return SecurityGroupResponse(
+                success=False,
+                message=result.get('message', 'Error eliminando security group'),
+                zone=zona,
+                slice_id=request.slice_id,
+                error=result.get('error')
+            )
+        
+        # Si exitoso en workers, sincronizar BD
+        delete_sg_from_db(request.slice_id, request.id_sg)
+        
+        data = result.get('data', {})
+        return SecurityGroupResponse(
+            success=data.get('success', False),
+            message=data.get('message', f'Security Group {request.id_sg} eliminado (BD actualizada)'),
+            zone=zona,
+            slice_id=request.slice_id
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error en remove-custom-security-group: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno: {str(e)}"
+        )
+
+@app.post("/security-groups-linux/remove-default", response_model=SecurityGroupResponse)
+async def remove_default_security_group(
+    request: RemoveDefaultSGRequest,
+    authorized: bool = Depends(get_service_auth)
+):
+    """
+    Eliminar security group default del cluster Linux de un slice
+    
+    ⚠️ ADVERTENCIA: Esto deja las VMs sin protección de firewall.
+    Solo recomendado antes de eliminar el slice completo.
+    
+    Args:
+        slice_id: ID del slice
+        zona_despliegue: Zona del slice
+        workers: Workers donde eliminar (opcional, se obtiene automáticamente de BD)
+    """
+    try:
+        zona = request.zona_despliegue.lower()
+        
+        logger.warning(f"Eliminando Security Group DEFAULT del slice {request.slice_id} en zona '{zona}'")
+        
+        if zona not in ['linux', 'openstack']:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Zona '{zona}' no soportada"
+            )
+        
+        # Obtener workers automáticamente si no se proporcionaron
+        workers = request.workers
+        if not workers:
+            workers = get_workers_from_slice(request.slice_id)
+            logger.info(f"Workers obtenidos automáticamente: {workers}")
+        
+        if zona == 'linux':
+            result = await call_security_api_linux(
+                "/remove-default",
+                method="POST",
+                payload={
+                    "slice_id": request.slice_id,
+                    "workers": workers
+                }
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail="Security Groups en OpenStack no implementado aún"
+            )
+        
+        if not result['success']:
+            return SecurityGroupResponse(
+                success=False,
+                message=result.get('message', 'Error eliminando security group default'),
+                zone=zona,
+                slice_id=request.slice_id,
+                error=result.get('error')
+            )
+        
+        # Si exitoso en workers, sincronizar BD
+        delete_default_sg_from_db(request.slice_id)
+        
+        data = result.get('data', {})
+        return SecurityGroupResponse(
+            success=data.get('success', False),
+            message=data.get('message', 'Security Group default eliminado (BD actualizada)'),
+            zone=zona,
+            slice_id=request.slice_id
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error en remove-default-security-group: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno: {str(e)}"
         )
 
 if __name__ == "__main__":

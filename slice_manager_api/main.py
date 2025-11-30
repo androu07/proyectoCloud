@@ -14,6 +14,8 @@ import json
 import logging
 from typing import List, Optional, Any
 import re
+import pika
+import time
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -41,9 +43,20 @@ JWT_SECRET = os.getenv('JWT_SECRET_KEY', 'mi_clave_secreta_super_segura_12345')
 JWT_ALGORITHM = 'HS256'
 IMAGE_MANAGER_URL = os.getenv('IMAGE_MANAGER_URL', 'http://image_manager_api:5700')
 IMAGE_MANAGER_TOKEN = os.getenv('IMAGE_MANAGER_TOKEN', 'clavesihna')
-NET_SEC_URL = os.getenv('NET_SEC_URL', 'http://net_sec_api:6300')
-QUEUE_MANAGER_URL = os.getenv('QUEUE_MANAGER_URL', 'http://queue_manager:6100')
 DRIVERS_URL = os.getenv('DRIVERS_URL', 'http://drivers:6200')
+VM_PLACEMENT_URL = os.getenv('VM_PLACEMENT_URL', 'http://vm_placement_api:6000')
+
+# Configuración RabbitMQ
+RABBITMQ_HOST = os.getenv('RABBITMQ_HOST', 'rabbitmq')
+RABBITMQ_PORT = int(os.getenv('RABBITMQ_PORT', 5672))
+RABBITMQ_USER = os.getenv('RABBITMQ_USER', 'guest')
+RABBITMQ_PASS = os.getenv('RABBITMQ_PASS', 'guest')
+
+# Nombres de colas
+VLAN_QUEUE_LINUX = 'vlan_mapping_linux'
+VLAN_QUEUE_OPENSTACK = 'vlan_mapping_openstack'
+VM_PLACEMENT_QUEUE_LINUX = 'vm_placement_linux'
+VM_PLACEMENT_QUEUE_OPENSTACK = 'vm_placement_openstack'
 
 # Configuración de BD
 DB_CONFIG = {
@@ -56,10 +69,97 @@ DB_CONFIG = {
 
 security = HTTPBearer()
 
+# ==================== AUTENTICACIÓN ====================
+
+def get_service_auth(credentials: HTTPAuthorizationCredentials = Depends(security)) -> bool:
+    """Verificar token de servicio interno"""
+    if credentials.credentials != IMAGE_MANAGER_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token de servicio inválido"
+        )
+    return True
+
+# ==================== FUNCIONES RABBITMQ ====================
+
+def get_rabbitmq_connection():
+    """Crear conexión a RabbitMQ con reintentos"""
+    max_retries = 5
+    retry_delay = 2
+    
+    for attempt in range(max_retries):
+        try:
+            credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS)
+            parameters = pika.ConnectionParameters(
+                host=RABBITMQ_HOST,
+                port=RABBITMQ_PORT,
+                credentials=credentials,
+                heartbeat=600,
+                blocked_connection_timeout=300
+            )
+            connection = pika.BlockingConnection(parameters)
+            logger.info(f"Conexión a RabbitMQ establecida en intento {attempt + 1}")
+            return connection
+        except Exception as e:
+            logger.warning(f"Intento {attempt + 1}/{max_retries} falló: {str(e)}")
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+            else:
+                raise Exception(f"No se pudo conectar a RabbitMQ después de {max_retries} intentos")
+
+def ensure_queues_exist():
+    """Asegurar que todas las colas existan"""
+    try:
+        connection = get_rabbitmq_connection()
+        channel = connection.channel()
+        
+        # Declarar las 4 colas
+        channel.queue_declare(queue=VLAN_QUEUE_LINUX, durable=True)
+        channel.queue_declare(queue=VLAN_QUEUE_OPENSTACK, durable=True)
+        channel.queue_declare(queue=VM_PLACEMENT_QUEUE_LINUX, durable=True)
+        channel.queue_declare(queue=VM_PLACEMENT_QUEUE_OPENSTACK, durable=True)
+        
+        connection.close()
+        logger.info("Todas las colas RabbitMQ verificadas/creadas")
+    except Exception as e:
+        logger.error(f"Error al crear colas: {str(e)}")
+
+def publish_to_queue(queue_name: str, message: dict):
+    """Publicar mensaje en una cola específica"""
+    try:
+        connection = get_rabbitmq_connection()
+        channel = connection.channel()
+        channel.queue_declare(queue=queue_name, durable=True)
+        
+        message_json = json.dumps(message)
+        channel.basic_publish(
+            exchange='',
+            routing_key=queue_name,
+            body=message_json,
+            properties=pika.BasicProperties(
+                delivery_mode=2,  # Mensaje persistente
+            )
+        )
+        
+        connection.close()
+        logger.info(f"Mensaje publicado en cola '{queue_name}'")
+        return True
+    except Exception as e:
+        logger.error(f"Error al publicar en cola '{queue_name}': {str(e)}")
+        raise Exception(f"Error al publicar en RabbitMQ: {str(e)}")
+
+@app.on_event("startup")
+async def startup_event():
+    """Inicializar colas al arrancar"""
+    import asyncio
+    await asyncio.sleep(3)  # Esperar a que RabbitMQ esté listo
+    ensure_queues_exist()
+
 # ==================== MODELOS PYDANTIC ====================
 
 class VMConfig(BaseModel):
     nombre: str
+    nombre_ui: str
     cores: str
     ram: str
     almacenamiento: str
@@ -68,11 +168,18 @@ class VMConfig(BaseModel):
     conexiones_vlans: str = ""
     internet: str
     server: str = ""
+    id_flavor_openstack: str = ""
     
     @validator('nombre')
     def validate_nombre(cls, v):
         if not re.match(r'^vm\d+$', v):
             raise ValueError('nombre debe tener formato vmX donde X es un número')
+        return v
+    
+    @validator('nombre_ui')
+    def validate_nombre_ui(cls, v):
+        if len(v) < 3 or len(v) > 30:
+            raise ValueError('nombre_ui debe tener entre 3 y 30 caracteres')
         return v
     
     @validator('cores')
@@ -142,8 +249,8 @@ class Topologia(BaseModel):
             cantidad = int(v)
             nombre_topo = values.get('nombre', '')
             
-            if nombre_topo == '1vm' and cantidad != 1:
-                raise ValueError('topología "1vm" debe tener exactamente 1 VM')
+            if nombre_topo == '1vm' and cantidad < 1:
+                raise ValueError('topología "1vm" debe tener al menos 1 VM')
             elif nombre_topo == 'lineal':
                 if cantidad < 2 or cantidad > 12:
                     raise ValueError('topología "lineal" debe tener entre 2 y 12 VMs')
@@ -180,14 +287,13 @@ class SolicitudJSON(BaseModel):
     id_slice: str = ""
     total_vms: str
     vlans_usadas: str = ""
-    vncs_usadas: str = ""
     conexiones_vms: str
     topologias: List[Topologia]
     
     @validator('id_slice')
     def validate_id_slice_empty(cls, v):
         if v != "":
-            raise ValueError('id_slice debe estar vacío en la petición inicial')
+            raise ValueError('Este campo debe estar vacío en la petición inicial')
         return v
     
     @validator('total_vms')
@@ -202,7 +308,7 @@ class SolicitudJSON(BaseModel):
             raise e
         return v
     
-    @validator('vlans_usadas', 'vncs_usadas')
+    @validator('vlans_usadas')
     def validate_empty_fields(cls, v):
         if v != "":
             raise ValueError('Este campo debe estar vacío en la petición inicial')
@@ -343,6 +449,20 @@ class SliceCreationRequest(BaseModel):
         if v not in ['linux', 'openstack']:
             raise ValueError('zona_despliegue debe ser "linux" o "openstack"')
         return v
+    
+    @root_validator(skip_on_failure=True)
+    def validate_flavor_openstack(cls, values):
+        """Validar que id_flavor_openstack no esté vacío si zona es openstack"""
+        zona = values.get('zona_despliegue')
+        solicitud = values.get('solicitud_json')
+        
+        if zona == 'openstack' and solicitud:
+            for topo in solicitud.topologias:
+                for vm in topo.vms:
+                    if not vm.id_flavor_openstack or vm.id_flavor_openstack.strip() == "":
+                        raise ValueError(f'VM {vm.nombre}: id_flavor_openstack no puede estar vacío cuando zona_despliegue es "openstack"')
+        
+        return values
 
 # ==================== AUTENTICACIÓN ====================
 
@@ -688,9 +808,8 @@ async def create_slice(
     1. Validar estructura JSON completa (automático con Pydantic)
     2. Guardar en BD con tipo='validado', estado=''
     3. Obtener slice_id generado
-    4. Llamar a net_sec_api para mapeo de VLANs y network
-    5. Enviar JSON mapeado a queue_manager para mapeo de servers
-    6. Retornar resumen completo
+    4. Publicar en RabbitMQ para mapeo de VLANs (según zona)
+    5. Retornar confirmación (procesamiento asíncrono)
     """
     connection = None
     cursor = None
@@ -711,248 +830,58 @@ async def create_slice(
         
         insert_query = """
             INSERT INTO slices 
-            (usuario, nombre_slice, tipo, estado, peticion_json, timestamp_creacion) 
-            VALUES (%s, %s, %s, %s, %s, %s)
+            (usuario, nombre_slice, tipo, estado, zona_disponibilidad, peticion_json, timestamp_creacion) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
         """
         cursor.execute(insert_query, (
             user['id'],
             slice_request.nombre_slice,
             'validado',
-            '',
+            'encolado',
+            slice_request.zona_despliegue,
             peticion_json_str,
             timestamp_creacion
         ))
         connection.commit()
         
         slice_id = cursor.lastrowid
-        logger.info(f"Slice {slice_id} creado - Tipo: validado")
+        logger.info(f"Slice {slice_id} creado - Zona: {slice_request.zona_despliegue}")
         
         cursor.close()
         connection.close()
         
-        # ===== PASO 2: Mapeo de VLANs y Network (net_sec_api) =====
-        logger.info(f"Slice {slice_id}: Iniciando mapeo de VLANs y network...")
+        # ===== PASO 2: Publicar en cola de VLANs según zona =====
+        zona = slice_request.zona_despliegue
+        vlan_queue = VLAN_QUEUE_LINUX if zona == 'linux' else VLAN_QUEUE_OPENSTACK
         
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                net_sec_response = await client.post(
-                    f"{NET_SEC_URL}/map-vlans",
-                    json={"slice_id": slice_id}
-                )
-                
-                if net_sec_response.status_code != 200:
-                    raise Exception(f"Error en net_sec_api: {net_sec_response.text}")
-                
-                net_sec_result = net_sec_response.json()
-                logger.info(f"Slice {slice_id}: VLANs y network mapeados exitosamente")
-                
-                # JSON mapeado con id_slice, vlans_usadas y network
-                mapped_json = net_sec_result['mapped_json']
-                
-        except Exception as e:
-            logger.error(f"Slice {slice_id}: Error en mapeo de VLANs/network: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error en mapeo de VLANs y network: {str(e)}"
-            )
-        
-        # ===== PASO 3: Mapeo de servers via queue_manager =====
-        logger.info(f"Slice {slice_id}: Iniciando mapeo de servers...")
-        
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                # Crear estructura completa para enviar directamente a vm_placement via queue
-                complete_request = {
-                    "nombre_slice": slice_request.nombre_slice,
-                    "zona_despliegue": slice_request.zona_despliegue,
-                    "solicitud_json": mapped_json
-                }
-                
-                # Encolar
-                enqueue_response = await client.post(
-                    f"{QUEUE_MANAGER_URL}/enqueue-placement",
-                    json=complete_request,
-                    headers={"Authorization": f"Bearer {IMAGE_MANAGER_TOKEN}"}
-                )
-                
-                if enqueue_response.status_code != 200:
-                    raise Exception(f"Error al encolar: {enqueue_response.text}")
-                
-                logger.info(f"Slice {slice_id}: Encolado exitosamente")
-                
-                # Procesar inmediatamente desde la cola
-                process_response = await client.post(
-                    f"{QUEUE_MANAGER_URL}/process-from-queue",
-                    headers={"Authorization": f"Bearer {IMAGE_MANAGER_TOKEN}"}
-                )
-                
-                if process_response.status_code != 200:
-                    raise Exception(f"Error al procesar cola: {process_response.text}")
-                
-                queue_result = process_response.json()
-                
-                if not queue_result.get('success'):
-                    raise Exception("Cola vacía o error al procesar")
-                
-                # Obtener el JSON con servers mapeados
-                placement_result = queue_result.get('result', {})
-                complete_request_with_servers = placement_result.get('peticion_json', {})
-                mapped_with_servers = complete_request_with_servers.get('solicitud_json', {})
-                
-                # IMPRIMIR JSON COMPLETO DESPUÉS DEL MAPEO DE SERVERS
-                logger.info(f"\n{'='*80}")
-                logger.info(f"Slice {slice_id}: JSON DESPUÉS DEL MAPEO DE SERVERS")
-                logger.info(f"{'='*80}")
-                logger.info(json.dumps(mapped_with_servers, indent=2, ensure_ascii=False))
-                logger.info(f"{'='*80}\n")
-                
-                logger.info(f"Slice {slice_id}: Mapeo de servers completado")
-                
-        except Exception as e:
-            logger.error(f"Slice {slice_id}: Error en mapeo de servers: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error en mapeo de servers: {str(e)}"
-            )
-        
-        # ===== PASO 4: Enviar al driver para despliegue =====
-        logger.info(f"Slice {slice_id}: Enviando al driver para despliegue en {slice_request.zona_despliegue}...")
-        
-        # Preparar payload completo para el driver
-        driver_payload = {
-            "json_config": {
-                "nombre_slice": slice_request.nombre_slice,
-                "zona_despliegue": slice_request.zona_despliegue,
-                "solicitud_json": mapped_with_servers
-            }
-        }
-        
-        logger.info(f"\n{'='*80}")
-        logger.info(f"Slice {slice_id}: JSON COMPLETO PARA ENVIAR AL DRIVER")
-        logger.info(f"{'='*80}")
-        logger.info(json.dumps(driver_payload, indent=2, ensure_ascii=False))
-        logger.info(f"{'='*80}\n")
-        
-        # Llamar al driver para despliegue
-        try:
-            async with httpx.AsyncClient(timeout=300.0) as client:
-                driver_response = await client.post(
-                    f"{DRIVERS_URL}/deploy-slice",
-                    json=driver_payload,
-                    headers={"Authorization": f"Bearer {IMAGE_MANAGER_TOKEN}"}
-                )
-                
-                if driver_response.status_code != 200:
-                    raise Exception(f"Error en driver: {driver_response.text}")
-                
-                driver_result = driver_response.json()
-                
-                if not driver_result.get('success'):
-                    error_msg = driver_result.get('error', 'Despliegue fallido')
-                    logger.error(f"Slice {slice_id}: Despliegue fallido - {error_msg}")
-                    raise Exception(f"Despliegue fallido: {error_msg}")
-                
-                # Obtener el JSON procesado con puertos VNC asignados
-                processed_json = driver_result.get('processed_json', {})
-                
-                # IMPRIMIR JSON FINAL CON PUERTOS VNC
-                logger.info(f"\n{'='*80}")
-                logger.info(f"Slice {slice_id}: JSON FINAL DESPUÉS DEL DESPLIEGUE")
-                logger.info(f"{'='*80}")
-                logger.info(json.dumps(processed_json, indent=2, ensure_ascii=False))
-                logger.info(f"{'='*80}\n")
-                
-                logger.info(f"Slice {slice_id}: Despliegue exitoso")
-                
-        except Exception as e:
-            logger.error(f"Slice {slice_id}: Error en despliegue: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error en despliegue: {str(e)}"
-            )
-        
-        # ===== PASO 5: Actualizar BD con datos del despliegue =====
-        logger.info(f"Slice {slice_id}: Actualizando BD con datos del despliegue...")
-        
-        try:
-            connection = mysql.connector.connect(**DB_CONFIG)
-            cursor = connection.cursor(dictionary=True)
-            
-            # El processed_json ya viene con los puertos VNC asignados por el orquestador
-            # Extraer todas las VMs de todas las topologías desde processed_json
-            all_vms = []
-            for topology in processed_json.get('topologias', []):
-                for vm in topology.get('vms', []):
-                    # Agregar campo estado a cada VM
-                    vm['estado'] = 'Corriendo'
-                    all_vms.append(vm)
-            
-            # Timestamp de despliegue
-            timestamp_despliegue = datetime.now(lima_tz).strftime("%Y-%m-%d %H:%M:%S")
-            
-            # Preparar datos para actualizar
-            peticion_json_str = json.dumps(processed_json, ensure_ascii=False)
-            vms_json_str = json.dumps(all_vms, ensure_ascii=False)
-            
-            # Actualizar BD (sin columna vncs)
-            update_query = """
-                UPDATE slices 
-                SET tipo = %s,
-                    estado = %s,
-                    peticion_json = %s,
-                    vms = %s,
-                    timestamp_despliegue = %s
-                WHERE id = %s
-            """
-            cursor.execute(update_query, (
-                'desplegado',
-                'corriendo',
-                peticion_json_str,
-                vms_json_str,
-                timestamp_despliegue,
-                slice_id
-            ))
-            connection.commit()
-            
-            cursor.close()
-            connection.close()
-            
-            logger.info(f"Slice {slice_id}: BD actualizada - tipo=desplegado, estado=corriendo")
-            logger.info(f"Slice {slice_id}: VMs guardadas: {len(all_vms)} VMs con puertos VNC")
-            
-        except Error as e:
-            logger.error(f"Slice {slice_id}: Error al actualizar BD: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error al actualizar BD después del despliegue: {str(e)}"
-            )
-        
-        # ===== PASO 6: Retornar resumen completo =====
-        return {
-            "success": True,
-            "message": f"Slice {slice_id} creado, mapeado y desplegado exitosamente",
+        vlan_message = {
             "slice_id": slice_id,
             "nombre_slice": slice_request.nombre_slice,
-            "zona_despliegue": slice_request.zona_despliegue,
-            "usuario_id": user['id'],
-            "usuario_correo": user['correo'],
-            "tipo": "desplegado",
-            "estado": "corriendo",
+            "zona_despliegue": zona,
+            "usuario_id": user['id']
+        }
+        
+        try:
+            publish_to_queue(vlan_queue, vlan_message)
+            logger.info(f"Slice {slice_id}: Publicado en cola '{vlan_queue}' para mapeo de VLANs")
+        except Exception as e:
+            logger.error(f"Slice {slice_id}: Error al publicar en RabbitMQ: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error al encolar slice: {str(e)}"
+            )
+        
+        # ===== RETORNAR CONFIRMACIÓN =====
+        return {
+            "success": True,
+            "message": "Slice creado y encolado para procesamiento",
+            "slice_id": slice_id,
+            "nombre_slice": slice_request.nombre_slice,
+            "zona_despliegue": zona,
+            "estado": "encolado",
+            "vlan_queue": vlan_queue,
             "timestamp_creacion": timestamp_creacion,
-            "timestamp_despliegue": timestamp_despliegue,
-            "networking": {
-                "vlans_allocated": net_sec_result['vlans_allocated'],
-                "vlans_string": net_sec_result['vlans_string'],
-                "network_allocated": net_sec_result['network_allocated'],
-                "total_links": net_sec_result['total_links'],
-                "vlan_mapping": net_sec_result['vlan_mapping']
-            },
-            "deployment": {
-                "status": "deployed",
-                "zone": slice_request.zona_despliegue,
-                "total_vms": len(all_vms),
-                "processed_json": processed_json
-            }
+            "nota": "El slice será procesado asíncronamente. Use /slices/info/{id} para verificar estado"
         }
         
     except HTTPException:
@@ -1133,6 +1062,225 @@ async def get_slice_info(
             detail=f"Error interno: {str(e)}"
         )
 
+# ==================== CALLBACK DE VM PLACEMENT ====================
+
+@app.post("/slices/deploymentready/{slice_id}")
+async def deployment_ready_callback(
+    slice_id: int,
+    payload: dict,
+    authorized: bool = Depends(get_service_auth)
+):
+    """
+    Callback de vm_placement_api cuando el JSON está listo para despliegue
+    
+    Nuevo flujo optimizado:
+    1. Guardar JSON completo (con workers/VLANs mapeados) en BD
+    2. Construir JSON simplificado para despliegue (solo: nombre, flavor, image, conexiones_vlans, server)
+    3. Enviar a drivers → recibe solo vnc_mapping
+    4. Actualizar campo puerto_vnc en vms de la BD
+    
+    Payload esperado:
+    {
+        "nombre_slice": "...",
+        "zona_despliegue": "linux",
+        "solicitud_json": { ... }  // JSON con workers y VLANs mapeados
+    }
+    """
+    try:
+        logger.info(f"[SLICE_MANAGER] Callback recibido para slice {slice_id}")
+        
+        zona_despliegue = payload.get('zona_despliegue')
+        solicitud_json = payload.get('solicitud_json')
+        nombre_slice = payload.get('nombre_slice')
+        
+        if not all([zona_despliegue, solicitud_json]):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Faltan campos requeridos: zona_despliegue, solicitud_json"
+            )
+        
+        # ==== PASO 1: Guardar JSON completo y VMs en BD ====
+        logger.info(f"[SLICE_MANAGER] Slice {slice_id}: Guardando JSON mapeado en BD...")
+        
+        all_vms = []
+        for topology in solicitud_json.get('topologias', []):
+            for vm in topology.get('vms', []):
+                vm['estado'] = 'Desplegando'
+                vm['puerto_vnc'] = ''  # Se llenará después del despliegue
+                all_vms.append(vm)
+        
+        connection = mysql.connector.connect(**DB_CONFIG)
+        cursor = connection.cursor()
+        
+        peticion_json_str = json.dumps(solicitud_json, ensure_ascii=False)
+        vms_json_str = json.dumps(all_vms, ensure_ascii=False)
+        
+        update_query = """
+            UPDATE slices 
+            SET tipo = %s,
+                estado = %s,
+                peticion_json = %s,
+                vms = %s
+            WHERE id = %s
+        """
+        cursor.execute(update_query, (
+            'mapeado',
+            'desplegando',
+            peticion_json_str,
+            vms_json_str,
+            slice_id
+        ))
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        logger.info(f"[SLICE_MANAGER] Slice {slice_id}: JSON guardado, construyendo payload simplificado...")
+        
+        # ==== PASO 2: Construir JSON simplificado para despliegue ====
+        simplified_vms = []
+        for topology in solicitud_json.get('topologias', []):
+            for vm in topology.get('vms', []):
+                # Construir flavor: cores;ram;almacenamiento
+                cores = vm.get('cores', '1')
+                ram = vm.get('ram', '512M')
+                almacenamiento = vm.get('almacenamiento', '1G')
+                flavor = f"{cores};{ram};{almacenamiento}"
+                
+                simplified_vm = {
+                    'nombre': vm.get('nombre'),
+                    'flavor': flavor,
+                    'image': vm.get('image'),
+                    'conexiones_vlans': vm.get('conexiones_vlans', ''),
+                    'server': vm.get('server')
+                }
+                simplified_vms.append(simplified_vm)
+        
+        # Payload simplificado
+        simplified_json = {
+            'zona_despliegue': zona_despliegue,
+            'id_slice': str(slice_id),
+            'topologias': [
+                {
+                    'vms': simplified_vms
+                }
+            ]
+        }
+        
+        driver_payload = {
+            "json_config": simplified_json
+        }
+        
+        logger.info(f"[SLICE_MANAGER] Slice {slice_id}: Llamando a drivers con JSON simplificado...")
+        
+        # ==== PASO 3: Llamar a drivers con JSON simplificado ====
+        async with httpx.AsyncClient(timeout=600.0) as client:
+            driver_response = await client.post(
+                f"{DRIVERS_URL}/deploy-slice",
+                json=driver_payload,
+                headers={"Authorization": f"Bearer {IMAGE_MANAGER_TOKEN}"}
+            )
+        
+        if driver_response.status_code != 200:
+            logger.error(f"[SLICE_MANAGER] Slice {slice_id}: Error en drivers: {driver_response.text}")
+            # Actualizar estado a error
+            connection = mysql.connector.connect(**DB_CONFIG)
+            cursor = connection.cursor()
+            cursor.execute("UPDATE slices SET estado = %s, tipo = %s WHERE id = %s", 
+                          ('error_despliegue', 'error', slice_id))
+            connection.commit()
+            cursor.close()
+            connection.close()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error en despliegue: {driver_response.text}"
+            )
+        
+        driver_result = driver_response.json()
+        
+        if not driver_result.get('success'):
+            error_msg = driver_result.get('error', 'Despliegue fallido')
+            logger.error(f"[SLICE_MANAGER] Slice {slice_id}: Despliegue fallido - {error_msg}")
+            # Actualizar estado a error
+            connection = mysql.connector.connect(**DB_CONFIG)
+            cursor = connection.cursor()
+            cursor.execute("UPDATE slices SET estado = %s, tipo = %s WHERE id = %s", 
+                          ('error_despliegue', 'error', slice_id))
+            connection.commit()
+            cursor.close()
+            connection.close()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Despliegue fallido: {error_msg}"
+            )
+        
+        # ==== PASO 4: Actualizar puerto_vnc en vms ====
+        vnc_mapping = driver_result.get('vnc_mapping', {})
+        
+        logger.info(f"[SLICE_MANAGER] Slice {slice_id}: Despliegue exitoso, actualizando VNC en BD...")
+        logger.info(f"[SLICE_MANAGER] VNC mapping recibido: {vnc_mapping}")
+        
+        # Actualizar puerto_vnc en cada VM
+        for vm in all_vms:
+            vm_name = vm.get('nombre')
+            if vm_name in vnc_mapping:
+                vm['puerto_vnc'] = str(vnc_mapping[vm_name])
+                vm['estado'] = 'Corriendo'
+            else:
+                logger.warning(f"[SLICE_MANAGER] No se encontró VNC para VM {vm_name}")
+                vm['puerto_vnc'] = ''
+                vm['estado'] = 'Error'
+        
+        # Timestamp de despliegue
+        lima_tz = pytz.timezone('America/Lima')
+        timestamp_despliegue = datetime.now(lima_tz).strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Actualizar BD con VNC
+        connection = mysql.connector.connect(**DB_CONFIG)
+        cursor = connection.cursor()
+        
+        vms_json_str = json.dumps(all_vms, ensure_ascii=False)
+        
+        update_query = """
+            UPDATE slices 
+            SET tipo = %s,
+                estado = %s,
+                vms = %s,
+                timestamp_despliegue = %s
+            WHERE id = %s
+        """
+        cursor.execute(update_query, (
+            'desplegado',
+            'corriendo',
+            vms_json_str,
+            timestamp_despliegue,
+            slice_id
+        ))
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        logger.info(f"[SLICE_MANAGER] Slice {slice_id}: BD actualizada - {len(all_vms)} VMs desplegadas")
+        
+        return {
+            "success": True,
+            "message": f"Slice {slice_id} desplegado y actualizado exitosamente",
+            "slice_id": slice_id,
+            "total_vms": len(all_vms),
+            "estado": "corriendo",
+            "vnc_ports": vnc_mapping
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[SLICE_MANAGER] Error en callback para slice {slice_id}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error procesando callback: {str(e)}"
+        )
+
 # ==================== ENDPOINTS DE GESTIÓN DE SLICES ====================
 
 @app.post("/slices/delete/{slice_id}")
@@ -1231,6 +1379,25 @@ async def delete_slice(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="No se pudo conectar con el servicio de drivers"
             )
+        
+        # Eliminar recursos asignados del tracking de VM placement
+        try:
+            logger.info(f"Eliminando recursos de tracking para slice {slice_id} en zona {zona_despliegue}")
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                tracking_response = await client.delete(
+                    f"{VM_PLACEMENT_URL}/delete-assigned-resources/{slice_id}",
+                    params={"zona": zona_despliegue},
+                    headers={"Authorization": f"Bearer {IMAGE_MANAGER_TOKEN}"}
+                )
+                
+                if tracking_response.status_code == 200:
+                    tracking_result = tracking_response.json()
+                    logger.info(f"Tracking limpiado: {tracking_result.get('vms_removed', 0)} VMs removidas")
+                else:
+                    logger.warning(f"Error al limpiar tracking (no crítico): {tracking_response.text}")
+        except Exception as track_error:
+            # No crítico - continuar con eliminación de BD
+            logger.warning(f"No se pudo limpiar tracking (no crítico): {str(track_error)}")
         
         # Eliminar slice de la BD
         delete_query = "DELETE FROM slices WHERE id = %s"

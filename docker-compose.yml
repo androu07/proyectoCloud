@@ -68,6 +68,8 @@ services:
   monitoring_api:
     image: prom/prometheus:latest
     container_name: monitoring_api
+    ports:
+      - "9090:9090"
     volumes:
       - ./monitoring_api/prometheus.yml:/etc/prometheus/prometheus.yml
       - metrics_data:/prometheus
@@ -80,16 +82,14 @@ services:
       - '--storage.tsdb.retention.size=2GB'
       - '--web.enable-lifecycle'
       - '--web.enable-admin-api'
+      - '--web.enable-remote-write-receiver'
       - '--web.external-url=http://localhost/prometheus/'
       - '--web.route-prefix=/prometheus/'
     networks:
       - red_cloud
     extra_hosts:
-      - "app:10.20.12.169"
       - "head-linux:192.168.203.1"
-      - "worker1:192.168.203.2"
-      - "worker2:192.168.203.3"
-      - "worker3:192.168.203.4"
+      - "head-openstack:192.168.204.1"
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
@@ -167,8 +167,11 @@ services:
       - JWT_SECRET_KEY=mi_clave_secreta_super_segura_12345
       - IMAGE_MANAGER_URL=http://image_manager_api:5700
       - IMAGE_MANAGER_TOKEN=clavesihna
-      - QUEUE_MANAGER_URL=http://queue_manager:6100
       - DRIVERS_URL=http://drivers:6200
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=guest
+      - RABBITMQ_PASS=guest
       - DB_HOST=slices_db
       - DB_PORT=3306
       - DB_NAME=slices_db
@@ -179,7 +182,7 @@ services:
     depends_on:
       - image_manager_api
       - slices_db
-      - queue_manager
+      - rabbitmq
       - drivers
     labels:
       - "traefik.enable=true"
@@ -191,35 +194,7 @@ services:
       - "traefik.http.routers.slice-manager.middlewares=slice-manager-strip"
     restart: unless-stopped
 
-  # Queue Manager - Gestor de colas
-  queue_manager:
-    build:
-      context: ./queue_manager
-      dockerfile: Dockerfile
-    container_name: queue_manager
-    environment:
-      - SERVICE_TOKEN=clavesihna
-      - RABBITMQ_HOST=rabbitmq
-      - RABBITMQ_PORT=5672
-      - RABBITMQ_USER=guest
-      - RABBITMQ_PASS=guest
-      - VM_PLACEMENT_URL=http://vm_placement_api:6000
-    networks:
-      - red_cloud
-    depends_on:
-      - rabbitmq
-      - vm_placement_api
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.queue-manager.rule=PathPrefix(`/queue`)"
-      - "traefik.http.routers.queue-manager.entrypoints=websecure"
-      - "traefik.http.routers.queue-manager.tls.certresolver=myresolver"
-      - "traefik.http.services.queue-manager.loadbalancer.server.port=6100"
-      - "traefik.http.middlewares.queue-manager-strip.stripprefix.prefixes=/queue"
-      - "traefik.http.routers.queue-manager.middlewares=queue-manager-strip"
-    restart: unless-stopped
-
-  # API VM Placement - Asignación de Workers
+  # API VM Placement - Asignación de Workers (Consumer RabbitMQ)
   vm_placement_api:
     build:
       context: ./vm_placement_api
@@ -227,8 +202,25 @@ services:
     container_name: vm_placement_api
     environment:
       - SERVICE_TOKEN=clavesihna
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=guest
+      - RABBITMQ_PASS=guest
+      - DRIVERS_URL=http://drivers:6200
+      - DB_HOST=slices_db
+      - DB_PORT=3306
+      - DB_NAME=slices_db
+      - DB_USER=slices_user
+      - DB_PASSWORD=slices_pass123
+      - PROMETHEUS_URL=http://monitoring_api:9090/prometheus
+    volumes:
+      - placement_tracking:/app/placement_tracking
     networks:
       - red_cloud
+    depends_on:
+      - rabbitmq
+      - slices_db
+      - drivers
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.vm-placement.rule=PathPrefix(`/placement`)"
@@ -239,7 +231,7 @@ services:
       - "traefik.http.routers.vm-placement.middlewares=vm-placement-strip"
     restart: unless-stopped
 
-  # Networking & Security - Configuración de red y Grupos de Seguridad
+  # Networking & Security - Configuración de red (Consumer RabbitMQ)
   net_sec_api:
     build:
       context: ./net_sec_api
@@ -247,15 +239,26 @@ services:
     container_name: net_sec_api
     environment:
       - SERVICE_TOKEN=clavesihna
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=guest
+      - RABBITMQ_PASS=guest
       - DB_HOST=slices_db
       - DB_PORT=3306
       - DB_NAME=slices_db
       - DB_USER=slices_user
       - DB_PASSWORD=slices_pass123
+      - SG_DB_HOST=security_groups_db
+      - SG_DB_PORT=3306
+      - SG_DB_NAME=security_groups_db
+      - SG_DB_USER=secgroups_user
+      - SG_DB_PASSWORD=secgroups_pass123
     networks:
       - red_cloud
     depends_on:
+      - rabbitmq
       - slices_db
+      - security_groups_db
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.net-sec.rule=PathPrefix(`/netsec`)"
@@ -274,10 +277,31 @@ services:
     container_name: drivers
     environment:
       - SERVICE_TOKEN=clavesihna
+      - DB_HOST=slices_db
+      - DB_PORT=3306
+      - DB_NAME=slices_db
+      - DB_USER=slices_user
+      - DB_PASSWORD=slices_pass123
+      - SG_DB_HOST=security_groups_db
+      - SG_DB_PORT=3306
+      - SG_DB_NAME=security_groups_db
+      - SG_DB_USER=secgroups_user
+      - SG_DB_PASSWORD=secgroups_pass123
     networks:
       - red_cloud
     extra_hosts:
       - "orquestador-linux:192.168.203.2"
+    depends_on:
+      - slices_db
+      - security_groups_db
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.drivers.rule=PathPrefix(`/drivers`)"
+      - "traefik.http.routers.drivers.entrypoints=websecure"
+      - "traefik.http.routers.drivers.tls.certresolver=myresolver"
+      - "traefik.http.services.drivers.loadbalancer.server.port=6200"
+      - "traefik.http.middlewares.drivers-strip.stripprefix.prefixes=/drivers"
+      - "traefik.http.routers.drivers.middlewares=drivers-strip"
     restart: unless-stopped
 
   # ========== CONTENEDORES COMPLEMENTARIOS A LAS APIS ==========
@@ -398,6 +422,22 @@ services:
       - red_cloud
     restart: unless-stopped
 
+  # Base de datos para Security Groups
+  security_groups_db:
+    image: mysql:8.0
+    container_name: security_groups_db
+    environment:
+      MYSQL_ROOT_PASSWORD: secgroups_root_password_123
+      MYSQL_DATABASE: security_groups_db
+      MYSQL_USER: secgroups_user
+      MYSQL_PASSWORD: secgroups_pass123
+    volumes:
+      - security_groups_data:/var/lib/mysql
+      - ./databases/init_security_groups.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - red_cloud
+    restart: unless-stopped
+
 networks:
   red_cloud:
     driver: bridge
@@ -405,6 +445,7 @@ networks:
 volumes:
   users_data:
   slices_data:
+  security_groups_data:
   metrics_data:
   grafana_data:
   images_data:
@@ -412,3 +453,4 @@ volumes:
   traefik_letsencrypt:
   traefik_logs:
   loki_data:
+  placement_tracking:

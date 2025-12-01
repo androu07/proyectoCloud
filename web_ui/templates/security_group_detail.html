@@ -1,0 +1,1103 @@
+{% extends 'base.html' %}
+
+{% block title %}Administrar Reglas — G1{% endblock %}
+
+{% block content %}
+<style>
+  .main-content {
+    padding-top: 8px;
+  }
+
+  /* Breadcrumb */
+  .breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 20px;
+    font-size: 14px;
+    color: #64748b;
+  }
+
+  .breadcrumb a {
+    color: #64748b;
+    text-decoration: none;
+    transition: color 0.2s ease;
+  }
+
+  .breadcrumb a:hover {
+    color: #667eea;
+  }
+
+  .breadcrumb .separator {
+    color: #cbd5e1;
+  }
+
+  .breadcrumb .active {
+    color: #9ca3af;
+    font-weight: 600;
+  }
+
+  /* Page Header */
+  .page-header {
+    margin-bottom: 24px;
+  }
+
+  .page-title {
+    font-size: 24px;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 0 0 8px 0;
+  }
+
+  .page-subtitle {
+    color: #64748b;
+    font-size: 14px;
+    margin: 0 0 4px 0;
+  }
+
+  /* Action Buttons */
+  .action-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: none;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .btn-add {
+    background: white;
+    color: #f97316;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  }
+
+  .btn-add:hover {
+    background: #fff7ed;
+    border-color: #fdba74;
+    transform: translateY(-1px);
+  }
+
+  .btn-delete {
+    background: #ef4444;
+    color: white;
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+  }
+
+  .btn-delete:hover {
+    background: #dc2626;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(239, 68, 68, 0.4);
+  }
+
+  /* Element Counter */
+  .element-counter {
+    background: #f1f5f9;
+    padding: 8px 16px;
+    border-radius: 8px 8px 0 0;
+    color: #64748b;
+    font-size: 13px;
+    font-weight: 600;
+    border: 1px solid #e2e8f0;
+    border-bottom: none;
+  }
+
+  /* Table Container */
+  .table-container {
+    background: white;
+    border-radius: 0 0 12px 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    margin-bottom: 16px;
+    border: 1px solid #e2e8f0;
+    border-top: none;
+  }
+
+  .rules-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .rules-table thead {
+    background: #f8fafc;
+    border-bottom: 2px solid #e2e8f0;
+  }
+
+  .rules-table th {
+    padding: 12px 16px;
+    text-align: left;
+    font-size: 13px;
+    font-weight: 700;
+    color: #475569;
+  }
+
+  .rules-table th:first-child {
+    width: 40px;
+    text-align: center;
+  }
+
+  .rules-table tbody tr {
+    border-bottom: 1px solid #e2e8f0;
+    transition: background-color 0.2s ease;
+  }
+
+  .rules-table tbody tr:hover {
+    background-color: #f8fafc;
+  }
+
+  .rules-table tbody tr:last-child {
+    border-bottom: none;
+  }
+
+  .rules-table td {
+    padding: 14px 16px;
+    font-size: 14px;
+    color: #334155;
+  }
+
+  .rules-table td:first-child {
+    text-align: center;
+  }
+
+  /* Direction Badge */
+  .direction-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .direction-badge.ingress {
+    background: #dbeafe;
+    color: #1e40af;
+  }
+
+  .direction-badge.egress {
+    background: #fef3c7;
+    color: #92400e;
+  }
+
+  /* Action Button in Table */
+  .action-btn-delete {
+    background: #dc2626;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .action-btn-delete:hover {
+    background: #b91c1c;
+  }
+
+  /* Modal Advanced Redesigned & Compact (No Scroll, Centered X) */
+
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.75) !important;
+    z-index: 1000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(4px);
+  }
+
+  .modal-overlay.active {
+    display: flex;
+  }
+
+  .modal {
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    width: 500px;
+    /* Reduced width as requested */
+    max-width: 95vw;
+    display: flex;
+    flex-direction: column;
+    overflow: visible;
+    transform: scale(0.95);
+    opacity: 0;
+    transition: all 0.2s ease-out;
+  }
+
+  .modal.show {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  .modal-header {
+    padding: 24px 32px 16px;
+    border-bottom: none;
+    display: flex;
+    justify-content: center;
+    /* Center title */
+    align-items: center;
+    background: #fff;
+    border-radius: 16px 16px 0 0;
+    position: relative;
+  }
+
+  .modal-title {
+    font-size: 20px;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 0;
+    text-align: center;
+  }
+
+  .modal-close {
+    position: absolute;
+    right: 24px;
+    top: 24px;
+    background: none;
+    border: none;
+    font-size: 24px;
+    color: #94a3b8;
+    cursor: pointer;
+    padding: 4px;
+    line-height: 1;
+    border-radius: 4px;
+    transition: all 0.2s;
+  }
+
+  .modal-close:hover {
+    color: #64748b;
+    background: #f1f5f9;
+  }
+
+  .modal-body {
+    padding: 0 32px 24px;
+  }
+
+  /* Form Grid Layout */
+  #addRuleForm {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    align-items: start;
+  }
+
+  .form-group {
+    margin-bottom: 0;
+  }
+
+  .form-group.full-width {
+    grid-column: span 2;
+  }
+
+  .form-label {
+    font-weight: 600;
+    font-size: 13px;
+    color: #334155;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .help-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    background: #e2e8f0;
+    color: #64748b;
+    border-radius: 50%;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: help;
+    position: relative;
+    transition: all 0.2s ease;
+  }
+
+  .help-icon:hover {
+    background: #667eea;
+    color: white;
+  }
+
+  .help-icon .tooltip {
+    visibility: hidden;
+    opacity: 0;
+    position: absolute;
+    z-index: 1000;
+    bottom: 125%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1e293b;
+    color: white;
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.4;
+    white-space: normal;
+    max-width: 250px;
+    min-width: 180px;
+    text-align: center;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    transition: all 0.2s ease;
+  }
+
+  .help-icon .tooltip::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 5px solid transparent;
+    border-top-color: #1e293b;
+  }
+
+  .help-icon:hover .tooltip {
+    visibility: visible;
+    opacity: 1;
+  }
+
+  .form-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: #334155;
+    margin-bottom: 6px;
+  }
+
+  .form-label .required {
+    color: #ef4444;
+    margin-left: 2px;
+  }
+
+  .form-control {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    font-size: 14px;
+    color: #1e293b;
+    background: white;
+    transition: all 0.2s;
+    box-sizing: border-box;
+  }
+
+  .form-control:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  }
+
+  textarea.form-control {
+    resize: none;
+    height: 60px;
+    font-family: inherit;
+  }
+
+  .modal-footer {
+    padding: 24px 32px 32px;
+    border-top: none;
+    display: flex;
+    justify-content: center;
+    /* Center buttons */
+    gap: 16px;
+    background: #fff;
+    border-radius: 0 0 16px 16px;
+  }
+
+  .btn-modal-cancel {
+    padding: 10px 24px;
+    background: white;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    color: #475569;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn-modal-cancel:hover {
+    background: #f1f5f9;
+    border-color: #94a3b8;
+    color: #334155;
+  }
+
+  .btn-modal-submit {
+    padding: 10px 32px;
+    background: #2563eb;
+    border: none;
+    border-radius: 8px;
+    color: white;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
+  }
+
+  .btn-modal-submit:hover {
+    background: #1d4ed8;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 6px rgba(37, 99, 235, 0.3);
+  }
+</style>
+
+<!-- Breadcrumb -->
+<div class="breadcrumb">
+  <a href="#">Proyecto</a>
+  <span class="separator">/</span>
+  <a href="#">Red</a>
+  <span class="separator">/</span>
+  <a href="{{ url_for('security_groups') }}">Grupos de seguridad</a>
+  <span class="separator">/</span>
+  <span class="active">Administrar Reglas de Grupo de Seguridad</span>
+</div>
+
+<!-- Page Header -->
+<div class="page-header" style="margin-bottom: 24px;">
+  <h1 class="page-title" style="font-size: 28px; font-weight: 500; color: #333; margin: 0;">{{ group_name if group_name else 'Default' }}</h1>
+  <p class="page-subtitle" style="color: #64748b; font-size: 14px; margin: 0 0 4px 0;">({{ group_id if group_id else '2d14e48f-ebf1-4551-9839-b65157a5c8eb' }})</p>
+</div>
+
+<!-- Toolbar with Search and Action Buttons -->
+<div class="toolbar" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; gap: 16px;">
+  <div class="search-container" style="position: relative; flex-grow: 1; max-width: 400px;">
+    <input type="text" class="search-input" placeholder="Filtrar reglas" style="width: 100%; padding: 8px 36px 8px 12px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 14px; color: #374151;">
+    <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: #9ca3af; pointer-events: none;">
+      <circle cx="11" cy="11" r="8"></circle>
+      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+    </svg>
+  </div>
+  <div class="action-group" style="display: flex; gap: 8px;">
+    <button class="btn btn-create" id="addRuleBtn" style="background: #667eea; color: white; border: 1px solid #667eea; padding: 8px 16px; border-radius: 4px; font-size: 14px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
+      <span style="font-weight:bold; font-size:16px;">+</span> Agregar regla
+    </button>
+    <button class="btn btn-delete" id="deleteRulesBtn" style="background: #ef4444; color: white; border: 1px solid #ef4444; padding: 8px 16px; border-radius: 4px; font-size: 14px; font-weight: 500; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;">
+        <polyline points="3 6 5 6 21 6"></polyline>
+        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+      </svg>
+      Eliminar Reglas
+    </button>
+  </div>
+</div>
+
+<!-- Element Counter -->
+<div class="element-counter">Mostrando <span id="ruleCount">{{ rules|length }}</span> elemento{{ 's' if rules|length != 1 else '' }}</div>
+
+<!-- Rules Table -->
+<div class="table-container">
+  <table class="rules-table">
+    <thead>
+      <tr>
+        <th>Direction</th>
+        <th>Ether Type</th>
+        <th>IP Protocol</th>
+        <th>Port Range</th>
+        <th>Remote IP Prefix</th>
+        <th>Description</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="rulesTableBody">
+      {% if rules %}
+        {% for rule in rules %}
+        <tr data-rule-id="{{ rule.id }}" data-id-openstack="{{ rule.id_openstack or '' }}">
+          <td>
+            <span class="direction-badge {{ 'egress' if rule.direction == 'egress' else 'ingress' }}">
+              {{ 'Saliente' if rule.direction == 'egress' else 'Entrante' }}
+            </span>
+          </td>
+          <td>{{ rule.ether_type or 'IPv4' }}</td>
+          <td>{{ rule.protocol|upper if rule.protocol != 'any' else 'Cualquiera' }}</td>
+          <td>{{ rule.port_range if rule.port_range and rule.port_range != 'any' else 'Cualquiera' }}</td>
+          <td>{{ rule.remote_ip_prefix or '-' }}</td>
+          <td>{{ rule.description or '-' }}</td>
+          <td><button class="action-btn-delete" onclick="deleteRule(this, {{ rule.id }})">Eliminar Regla</button></td>
+        </tr>
+        {% endfor %}
+      {% else %}
+        <tr>
+          <td colspan="7" style="text-align: center; padding: 2rem; color: #6b7280;">
+            No hay reglas configuradas para este security group
+          </td>
+        </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Advanced Add Rule Modal -->
+<!-- Modal de confirmación para eliminar regla individual -->
+<!-- Modal de confirmación para eliminar regla individual -->
+<!-- Modal de confirmación para eliminar regla individual -->
+<div class="modal-overlay" id="deleteRuleModal">
+  <div class="modal-container delete-rule-modal">
+    <div class="modal-header" style="padding: 20px 28px 8px 28px; border-bottom: none; display: flex; justify-content: space-between; align-items: center;">
+      <span class="modal-title" style="font-size: 1.5rem; font-weight: 700; color: #1e293b;">Eliminar Regla de Seguridad</span>
+      <button class="modal-close" id="closeDeleteRuleModal" style="background: none; border: none; color: #6b7280; cursor: pointer; font-size: 22px;">&times;</button>
+    </div>
+    <div style="padding: 0 28px 0 28px; text-align: center; font-size: 1.08rem; color: #334155;">
+      <p style="margin: 0 0 10px 0;">¿Estás seguro de que deseas eliminar esta regla de seguridad?</p>
+      <p style="margin: 0; font-size: 0.95rem; color: #64748b;">Esta acción no se puede deshacer y la regla se eliminará del cluster.</p>
+      <div style="height: 18px;"></div>
+    </div>
+    <div style="display: flex; justify-content: center; gap: 16px; padding: 0 0 32px 0; margin-top: 0;">
+      <button class="btn btn-cancel" id="cancelDeleteRuleBtn">Cancelar</button>
+      <button class="btn btn-delete" id="confirmDeleteRuleBtn">Eliminar</button>
+    </div>
+  </div>
+</div>
+    .delete-rule-modal {
+      background: #fff;
+      width: 100%;
+      max-width: 420px;
+      border-radius: 12px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.12);
+      margin: auto;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+    }
+  .unified-modal .unified-modal-body {
+    padding: 24px 32px 0 32px;
+    text-align: center;
+    font-size: 1.1rem;
+    color: #334155;
+    margin-bottom: 0;
+    background: none;
+    border-radius: 0 0 12px 12px;
+  }
+
+  .unified-modal-footer {
+    padding: 0;
+    background: none;
+    border-top: none;
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    margin-top: 16px;
+    border-radius: 0;
+  }
+
+<!-- Modal de confirmación para eliminar reglas seleccionadas -->
+<dialog id="deleteSelectedRulesModal" class="modal-dialog">
+  <form method="dialog" style="margin:0;">
+    <div class="modal-header" style="justify-content:center; border-bottom:none;">
+      <h2 class="modal-title" style="font-size:2rem; font-weight:700; color:#1e293b; text-align:center;">Confirmar eliminación</h2>
+    </div>
+    <div class="modal-body" style="text-align:center; font-size:1.1rem; color:#334155; margin-bottom:32px;">
+      ¿Estás seguro de que deseas eliminar las reglas seleccionadas?
+    </div>
+    <div class="modal-footer" style="display:flex; justify-content:center; gap:16px;">
+      <button type="button" class="btn-modal-cancel" id="cancelDeleteSelectedRulesBtn">Cancelar</button>
+      <button type="submit" class="btn-modal-submit" id="confirmDeleteSelectedRulesBtn">Eliminar</button>
+    </div>
+  </form>
+</dialog>
+<div class="modal-bg" id="addRuleModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 class="modal-title">Agregar regla</h2>
+      <button class="modal-close" onclick="closeAddRuleModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <form id="addRuleForm">
+        <!-- Row 1: Rule & Direction -->
+        <div class="form-group">
+          <label class="form-label">Regla <span class="required">*</span></label>
+          <select class="form-control" name="rule_template" id="ruleTemplate">
+            <option value="custom_tcp">Regla TCP a medida</option>
+            <option value="custom_udp">Regla UDP a medida</option>
+            <option value="custom_icmp">Regla ICMP a medida</option>
+            <option value="ssh">SSH</option>
+            <option value="http">HTTP</option>
+            <option value="https">HTTPS</option>
+            <option value="dns">DNS</option>
+            <option value="all_icmp">Todos los ICMP</option>
+            <option value="all_tcp">Todos los TCP</option>
+            <option value="all_udp">Todos los UDP</option>
+          </select>
+        </div>
+
+        <div class="form-group" id="directionGroup">
+          <label class="form-label">Dirección</label>
+          <select class="form-control" name="direction">
+            <option value="ingress">Entrante</option>
+            <option value="egress">Saliente</option>
+          </select>
+        </div>
+
+        <!-- Row 2: Description (Full Width) -->
+        <div class="form-group full-width">
+          <label class="form-label">
+            Descripción
+            <span class="help-icon">
+              ?
+              <span class="tooltip">Una breve descripción del grupo de seguridad que está añadiendo</span>
+            </span>
+          </label>
+          <textarea class="form-control" name="description" rows="2"></textarea>
+        </div>
+
+        <!-- Row 3: Port Type (only shown for custom TCP/UDP rules) -->
+        <div class="form-group" id="portTypeGroup">
+          <label class="form-label">
+            Puerto abierto <span class="required">*</span>
+            <span class="help-icon">
+              ?
+              <span class="tooltip">Seleccione cómo desea especificar el puerto</span>
+            </span>
+          </label>
+          <select class="form-control" name="port_type" id="portType">
+            <option value="port">Puerto</option>
+            <option value="range">Rango de puertos</option>
+            <option value="all">Todos los puertos</option>
+          </select>
+        </div>
+
+        <!-- Single Port Input (shown when port_type = 'port') -->
+        <div class="form-group" id="portInputGroup" style="display: block;">
+          <label class="form-label">
+            Puerto <span class="required">*</span>
+            <span class="help-icon">
+              ?
+              <span class="tooltip">Número de puerto (1-65535). Ej: 22 para SSH</span>
+            </span>
+          </label>
+          <input type="number" class="form-control" name="port" id="portInput" placeholder="Ej: 22" min="1" max="65535">
+        </div>
+
+        <!-- Port Range: From Port (shown when port_type = 'range') -->
+        <div class="form-group" id="portFromGroup" style="display: none;">
+          <label class="form-label">
+            Desde puerto <span class="required">*</span>
+            <span class="help-icon">
+              ?
+              <span class="tooltip">Puerto inicial del rango (1-65535)</span>
+            </span>
+          </label>
+          <input type="number" class="form-control" name="port_from" id="portFromInput" placeholder="Ej: 1024" min="1" max="65535">
+        </div>
+
+        <!-- Port Range: To Port (shown when port_type = 'range') -->
+        <div class="form-group" id="portToGroup" style="display: none;">
+          <label class="form-label">
+            Hasta puerto <span class="required">*</span>
+            <span class="help-icon">
+              ?
+              <span class="tooltip">Puerto final del rango (1-65535)</span>
+            </span>
+          </label>
+          <input type="number" class="form-control" name="port_to" id="portToInput" placeholder="Ej: 2048" min="1" max="65535">
+        </div>
+
+        <!-- ICMP Type (only shown for custom ICMP rules) -->
+        <div class="form-group" id="icmpTypeGroup" style="display: none;">
+          <label class="form-label">
+            Tipo
+            <span class="help-icon">
+              ?
+              <span class="tooltip">Tipo de mensaje ICMP (0-255). Ej: 8 para Echo Request</span>
+            </span>
+          </label>
+          <input type="number" class="form-control" name="icmp_type" id="icmpTypeInput" placeholder="Ej: 8" min="0" max="255">
+        </div>
+
+        <!-- ICMP Code (only shown for custom ICMP rules) -->
+        <div class="form-group" id="icmpCodeGroup" style="display: none;">
+          <label class="form-label">
+            Código
+            <span class="help-icon">
+              ?
+              <span class="tooltip">Código de mensaje ICMP (0-255). Ej: 0 para Echo Reply</span>
+            </span>
+          </label>
+          <input type="number" class="form-control" name="icmp_code" id="icmpCodeInput" placeholder="Ej: 0" min="0" max="255">
+        </div>
+
+        <!-- Remote/CIDR Input -->
+        <div class="form-group" id="remoteInputGroup">
+          <label class="form-label" id="remoteLabel">
+            CIDR <span class="required">*</span>
+            <span class="help-icon">
+              ?
+              <span class="tooltip">Classless Inter-Domain Routing (e.g. 192.168.0.0/24, or 2001:db8::/128)</span>
+            </span>
+          </label>
+          <input type="text" class="form-control" name="remote_value" id="remoteValue" value="0.0.0.0/0">
+        </div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn-modal-cancel" onclick="closeAddRuleModal()">Cancelar</button>
+      <button type="button" class="btn-modal-submit" onclick="submitAddRule()">Agregar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    // Eliminar regla individual
+    let ruleToDelete = null;
+    let ruleIdToDelete = null;
+    
+    window.deleteRule = function(btn, ruleId) {
+      const row = btn.closest('tr');
+      ruleToDelete = row;
+      ruleIdToDelete = ruleId;
+      const modal = document.getElementById('deleteRuleModal');
+      modal.classList.add('active');
+    };
+    
+    document.getElementById('cancelDeleteRuleBtn').onclick = function() {
+      document.getElementById('deleteRuleModal').classList.remove('active');
+      ruleToDelete = null;
+      ruleIdToDelete = null;
+    };
+    
+    document.getElementById('closeDeleteRuleModal').onclick = function() {
+      document.getElementById('deleteRuleModal').classList.remove('active');
+      ruleToDelete = null;
+      ruleIdToDelete = null;
+    };
+    
+    document.getElementById('confirmDeleteRuleBtn').onclick = async function() {
+      if (ruleToDelete && ruleIdToDelete) {
+        const idOpenstack = ruleToDelete.getAttribute('data-id-openstack') || '';
+        const securityGroupId = {{ group_id }};
+        
+        try {
+          const response = await fetch(`/security-group/${securityGroupId}/delete-rule/${ruleIdToDelete}`, {
+            method: 'DELETE',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              id_openstack: idOpenstack
+            })
+          });
+          
+          const data = await response.json();
+          
+          if (response.ok && data.success) {
+            ruleToDelete.remove();
+            updateRuleCount();
+            // Mostrar mensaje de éxito si hay un sistema de notificaciones
+            console.log('Regla eliminada exitosamente');
+          } else {
+            alert('Error al eliminar regla: ' + (data.message || 'Error desconocido'));
+          }
+        } catch (error) {
+          console.error('Error:', error);
+          alert('Error de conexión al eliminar regla');
+        }
+        
+        ruleToDelete = null;
+        ruleIdToDelete = null;
+      }
+      document.getElementById('deleteRuleModal').classList.remove('active');
+    };
+
+    // Eliminar reglas seleccionadas
+    document.getElementById('deleteRulesBtn').addEventListener('click', function(e) {
+      e.preventDefault();
+      const selected = Array.from(document.querySelectorAll('.row-checkbox')).filter(cb => cb.checked);
+      if (selected.length > 0) {
+        const dialog = document.getElementById('deleteSelectedRulesModal');
+        dialog.showModal();
+      }
+    });
+    document.getElementById('cancelDeleteSelectedRulesBtn').onclick = function() {
+      document.getElementById('deleteSelectedRulesModal').close();
+    };
+    document.getElementById('confirmDeleteSelectedRulesBtn').onclick = function() {
+      Array.from(document.querySelectorAll('.row-checkbox')).forEach(cb => {
+        if (cb.checked) {
+          cb.closest('tr').remove();
+        }
+      });
+      document.getElementById('deleteSelectedRulesModal').close();
+    };
+  });
+  // Update rule count
+  function updateRuleCount() {
+    const count = document.querySelectorAll('#rulesTableBody tr').length;
+    document.getElementById('ruleCount').textContent = count;
+  }
+
+  // Port type logic: show/hide port inputs based on selection
+  const portTypeSelect = document.getElementById('portType');
+  const portTypeGroup = document.getElementById('portTypeGroup');
+  const directionGroup = document.getElementById('directionGroup');
+  const portInputGroup = document.getElementById('portInputGroup');
+  const portFromGroup = document.getElementById('portFromGroup');
+  const portToGroup = document.getElementById('portToGroup');
+  const icmpTypeGroup = document.getElementById('icmpTypeGroup');
+  const icmpCodeGroup = document.getElementById('icmpCodeGroup');
+
+  function updatePortInputs() {
+    const val = portTypeSelect ? portTypeSelect.value : 'port';
+    if (val === 'range') {
+      // Mostrar "Desde puerto" y "Hasta puerto"
+      if (portInputGroup) portInputGroup.style.display = 'none';
+      if (portFromGroup) portFromGroup.style.display = 'block';
+      if (portToGroup) portToGroup.style.display = 'block';
+    } else if (val === 'all') {
+      // No mostrar ningún campo de puerto
+      if (portInputGroup) portInputGroup.style.display = 'none';
+      if (portFromGroup) portFromGroup.style.display = 'none';
+      if (portToGroup) portToGroup.style.display = 'none';
+    } else {
+      // Mostrar solo "Puerto" (default: 'port')
+      if (portInputGroup) portInputGroup.style.display = 'block';
+      if (portFromGroup) portFromGroup.style.display = 'none';
+      if (portToGroup) portToGroup.style.display = 'none';
+    }
+  }
+
+  if (portTypeSelect) {
+    portTypeSelect.addEventListener('change', updatePortInputs);
+    // Initialize on page load
+    updatePortInputs();
+  }
+
+  // Modal handlers
+  document.getElementById('addRuleBtn').addEventListener('click', function () {
+    const modal = document.getElementById('addRuleModal');
+    modal.style.display = 'flex';
+    // Trigger reflow to enable transition
+    setTimeout(() => {
+      modal.querySelector('.modal').classList.add('show');
+    }, 10);
+    
+    // Initialize form state based on default rule template
+    const templateVal = ruleTemplate ? ruleTemplate.value : 'custom_tcp';
+    
+    // Show direction by default
+    if (directionGroup) directionGroup.style.display = 'block';
+    
+    if (templateVal === 'custom_tcp' || templateVal === 'custom_udp') {
+      if (portTypeGroup) portTypeGroup.style.display = 'block';
+      updatePortInputs();
+    } else if (templateVal === 'custom_icmp') {
+      if (icmpTypeGroup) icmpTypeGroup.style.display = 'block';
+      if (icmpCodeGroup) icmpCodeGroup.style.display = 'block';
+    } else if (templateVal === 'ssh' || templateVal === 'http' || templateVal === 'https' || templateVal === 'dns') {
+      // Hide direction for SSH/HTTP/HTTPS/DNS
+      if (directionGroup) directionGroup.style.display = 'none';
+    } else {
+      // For all_icmp, all_tcp, all_udp: hide all dynamic fields
+      if (portTypeGroup) portTypeGroup.style.display = 'none';
+      if (portInputGroup) portInputGroup.style.display = 'none';
+      if (portFromGroup) portFromGroup.style.display = 'none';
+      if (portToGroup) portToGroup.style.display = 'none';
+      if (icmpTypeGroup) icmpTypeGroup.style.display = 'none';
+      if (icmpCodeGroup) icmpCodeGroup.style.display = 'none';
+    }
+  });
+
+  function closeAddRuleModal() {
+    const modal = document.getElementById('addRuleModal');
+    const modalContent = modal.querySelector('.modal');
+
+    modalContent.classList.remove('show');
+
+    setTimeout(() => {
+      modal.style.display = 'none';
+      document.getElementById('addRuleForm').reset();
+      
+      // Reset to default state: custom_tcp with port type selector visible
+      const ruleTemplateEl = document.getElementById('ruleTemplate');
+      if (ruleTemplateEl) ruleTemplateEl.value = 'custom_tcp';
+      
+      const portTypeEl = document.getElementById('portType');
+      if (portTypeEl) portTypeEl.value = 'port';
+      
+      // Show port type group and single port input by default
+      if (directionGroup) directionGroup.style.display = 'block';
+      if (portTypeGroup) portTypeGroup.style.display = 'block';
+      if (portInputGroup) portInputGroup.style.display = 'block';
+      if (portFromGroup) portFromGroup.style.display = 'none';
+      if (portToGroup) portToGroup.style.display = 'none';
+      if (icmpTypeGroup) icmpTypeGroup.style.display = 'none';
+      if (icmpCodeGroup) icmpCodeGroup.style.display = 'none';
+    }, 200); // Wait for transition
+  }
+
+  // Close modal on background click
+  document.getElementById('addRuleModal').addEventListener('click', function (e) {
+    if (e.target === this) {
+      closeAddRuleModal();
+    }
+  });
+
+  // Rule template logic
+  const ruleTemplate = document.getElementById('ruleTemplate');
+  const portInput = document.getElementById('portInput');
+
+  ruleTemplate.addEventListener('change', function () {
+    const val = this.value;
+    
+    // Hide all dynamic fields first
+    if (portTypeGroup) portTypeGroup.style.display = 'none';
+    if (portInputGroup) portInputGroup.style.display = 'none';
+    if (portFromGroup) portFromGroup.style.display = 'none';
+    if (portToGroup) portToGroup.style.display = 'none';
+    if (icmpTypeGroup) icmpTypeGroup.style.display = 'none';
+    if (icmpCodeGroup) icmpCodeGroup.style.display = 'none';
+    
+    // Show direction by default (hide only for ssh/http/https)
+    if (directionGroup) directionGroup.style.display = 'block';
+    
+    if (val === 'custom_tcp' || val === 'custom_udp') {
+      // Show port type selector for custom TCP/UDP rules
+      if (portTypeGroup) portTypeGroup.style.display = 'block';
+      updatePortInputs(); // Update port inputs based on current selection
+    } else if (val === 'custom_icmp') {
+      // Show ICMP Type and Code fields for custom ICMP rules
+      if (icmpTypeGroup) icmpTypeGroup.style.display = 'block';
+      if (icmpCodeGroup) icmpCodeGroup.style.display = 'block';
+    } else if (val === 'ssh' || val === 'http' || val === 'https' || val === 'dns') {
+      // Hide direction for SSH/HTTP/HTTPS/DNS
+      if (directionGroup) directionGroup.style.display = 'none';
+    }
+    // For 'all_icmp', 'all_tcp', 'all_udp': only show basic fields (Regla, Descripción, Dirección, CIDR)
+    // All dynamic fields are already hidden above
+  });
+
+  // Submit handler
+  function submitAddRule() {
+    const form = document.getElementById('addRuleForm');
+    const formData = new FormData(form);
+    const ruleTemplateValue = formData.get('rule_template');
+
+    let portRangeValue = 'Cualquiera';
+    let directionValue = formData.get('direction') || 'ingress';
+    
+    // For SSH/HTTP/HTTPS/DNS, always use 'ingress' direction
+    if (ruleTemplateValue === 'ssh' || ruleTemplateValue === 'http' || ruleTemplateValue === 'https' || ruleTemplateValue === 'dns') {
+      directionValue = 'ingress';
+    }
+    
+    // Determine port range based on rule type
+    if (ruleTemplateValue === 'custom_tcp' || ruleTemplateValue === 'custom_udp') {
+      // For custom TCP/UDP, use port type selection
+      const selectedPortType = formData.get('port_type') || 'port';
+      
+      if (selectedPortType === 'range') {
+        const pf = formData.get('port_from') || '';
+        const pt = formData.get('port_to') || '';
+        portRangeValue = pf && pt ? `${pf}-${pt}` : (pf || pt || 'Cualquiera');
+      } else if (selectedPortType === 'all') {
+        portRangeValue = 'Todos los puertos';
+      } else {
+        portRangeValue = formData.get('port') || 'Cualquiera';
+      }
+    } else if (ruleTemplateValue === 'custom_icmp') {
+      // For custom ICMP, use Type and Code
+      const icmpType = formData.get('icmp_type') || '';
+      const icmpCode = formData.get('icmp_code') || '';
+      if (icmpType && icmpCode) {
+        portRangeValue = `Tipo: ${icmpType}, Código: ${icmpCode}`;
+      } else if (icmpType) {
+        portRangeValue = `Tipo: ${icmpType}`;
+      } else if (icmpCode) {
+        portRangeValue = `Código: ${icmpCode}`;
+      } else {
+        portRangeValue = 'Cualquiera';
+      }
+    } else if (ruleTemplateValue === 'ssh' || ruleTemplateValue === 'http' || ruleTemplateValue === 'https' || ruleTemplateValue === 'dns') {
+      // For predefined rules, assign port internally without showing field
+      if (ruleTemplateValue === 'ssh') portRangeValue = '22';
+      else if (ruleTemplateValue === 'http') portRangeValue = '80';
+      else if (ruleTemplateValue === 'https') portRangeValue = '443';
+      else if (ruleTemplateValue === 'dns') portRangeValue = '53';
+    } else if (ruleTemplateValue === 'all_icmp' || ruleTemplateValue === 'all_tcp' || ruleTemplateValue === 'all_udp') {
+      // For "all" rules
+      portRangeValue = 'Cualquiera';
+    }
+
+    const rule = {
+      direction: directionValue,
+      ether_type: 'IPv4', // Default for this form
+      ip_protocol: getProtocolFromTemplate(ruleTemplateValue),
+      port_range: portRangeValue,
+      remote_ip: formData.get('remote_value') || '0.0.0.0/0',
+      remote_sg: '-',
+      description: formData.get('description') || '-'
+    };
+
+    addRuleToTable(rule);
+    closeAddRuleModal();
+  }
+
+  function getProtocolFromTemplate(template) {
+    if (template.includes('tcp') || template === 'ssh' || template === 'http' || template === 'https') return 'TCP';
+    if (template.includes('udp') || template === 'dns') return 'UDP';
+    if (template.includes('icmp')) return 'ICMP';
+    return 'TCP';
+  }
+
+  function addRuleToTable(rule) {
+    const tbody = document.getElementById('rulesTableBody');
+    const tr = document.createElement('tr');
+    const directionClass = rule.direction === 'ingress' ? 'ingress' : 'egress';
+    const directionText = rule.direction === 'ingress' ? 'Entrante' : 'Saliente';
+
+    tr.innerHTML = `
+        <td><input type="checkbox" class="row-checkbox"></td>
+        <td><span class="direction-badge ${directionClass}">${directionText}</span></td>
+        <td>${rule.ether_type}</td>
+        <td>${rule.ip_protocol}</td>
+        <td>${rule.port_range}</td>
+        <td>${rule.remote_ip}</td>
+        <td>${rule.remote_sg}</td>
+        <td>${rule.description}</td>
+        <td><button class="action-btn-delete" onclick="deleteRule(this)">Eliminar Regla</button></td>
+      `;
+    tbody.appendChild(tr);
+    updateRuleCount();
+  }
+
+  // Delete single rule
+
+  // Eliminar regla individual ahora solo con modal personalizado
+  function deleteRule(button) {
+    // Modal personalizado ya implementado arriba
+  }
+
+  // Delete selected rules
+  // Eliminar reglas seleccionadas ahora solo con modal personalizado
+  // La lógica de los modales ya está implementada arriba
+
+  // Select all checkbox
+  document.getElementById('selectAll').addEventListener('change', function () {
+    const checkboxes = document.querySelectorAll('.row-checkbox');
+    checkboxes.forEach(cb => cb.checked = this.checked);
+  });
+
+  // Initialize rule count
+  updateRuleCount();
+</script>
+{% endblock %}

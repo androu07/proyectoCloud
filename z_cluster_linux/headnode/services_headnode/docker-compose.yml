@@ -1,0 +1,75 @@
+services:
+  # ========== CONTENEDORES APIS ==========
+  # API del orquestador
+  orquestador:
+    build:
+      context: ./orquestador
+      dockerfile: Dockerfile
+    container_name: orquestador_api
+    restart: always
+    network_mode: "host"
+    environment:
+      - MONGODB_URL=mongodb://localhost:27017/vncs_db
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      vncs_bd:
+        condition: service_healthy
+    volumes:
+      - ./orquestador/orquestador_api.py:/app/orquestador_api.py
+      - ./orquestador/vnc_manager.py:/app/vnc_manager.py
+      - /mnt/nfs/shared:/mnt/nfs/shared
+  
+  # API de Monitoreo de métricas Cluster Linux
+  monitoring_api:
+    image: prom/prometheus:latest
+    container_name: monitoring_api
+    restart: unless-stopped
+    network_mode: "host"
+    volumes:
+      - ./monitoring_api/prometheus.yml:/etc/prometheus/prometheus.yml
+      - metrics_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=7d'
+      - '--storage.tsdb.retention.size=2GB'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+
+  # API de Security Groups (Coordinador multi-worker)
+  security_api:
+    build:
+      context: ./security
+      dockerfile: Dockerfile
+    container_name: security_api
+    restart: always
+    network_mode: "host"
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./security/security_api.py:/app/security_api.py
+
+  # ========== CONTENEDORES BASE DE DATOS ==========
+  # Base de datos de puertos VNC
+  vncs_bd:
+    image: mongo:7.0
+    container_name: vncs_bd
+    restart: always
+    network_mode: "host"
+    environment:
+      MONGO_INITDB_DATABASE: vncs_db
+    volumes:
+      - vncs_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  vncs_data:
+    driver: local
+  metrics_data:
+    driver: local

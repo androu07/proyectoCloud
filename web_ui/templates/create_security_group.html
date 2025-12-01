@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+
+{% block title %}Crear Grupo de Seguridad — G1{% endblock %}
+
+{% block content %}
+<style>
+  .sg-create-form {
+    max-width: 420px;
+    margin: 32px auto;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.07);
+    padding: 32px 28px 24px 28px;
+  }
+  .sg-create-form h2 {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 18px;
+    color: #1e293b;
+    text-align: center;
+  }
+  .sg-create-form label {
+    font-weight: 600;
+    color: #475569;
+    margin-bottom: 4px;
+    font-size: 14px;
+    display: block;
+  }
+  .sg-create-form input {
+    width: 100%;
+    padding: 7px 10px;
+    margin-bottom: 16px;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    font-size: 15px;
+    color: #1e293b;
+    background: #f9fafb;
+  }
+  .sg-create-form button {
+    background: #2563eb;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 10px 24px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    width: 100%;
+    margin-top: 8px;
+    transition: background 0.2s;
+  }
+  .sg-create-form button:hover {
+    background: #1d4ed8;
+  }
+</style>
+<div class="sg-create-form">
+  <h2>Crear Grupo de Seguridad</h2>
+  <form method="POST">
+    <label for="group_name">Nombre del grupo</label>
+    <input type="text" id="group_name" name="group_name" required>
+    <label for="vpc_id">VPC</label>
+    <input type="text" id="vpc_id" name="vpc_id" required>
+    <label for="description">Descripción</label>
+    <input type="text" id="description" name="description">
+    <button type="submit">Crear Grupo</button>
+  </form>
+</div>
+{% if message %}
+  <div style="text-align:center;color:#2563eb;font-weight:600;margin-top:18px;">{{ message }}</div>
+{% endif %}
+{% endblock %}

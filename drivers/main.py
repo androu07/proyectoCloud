@@ -294,12 +294,13 @@ def get_workers_from_slice(slice_id: int) -> str:
             connection.close()
 
 # Funciones de BD - Security Groups
-def create_sg_in_db(slice_id: int, description: str = "") -> int:
+def create_sg_in_db(slice_id: int, zona: str, description: str = "") -> int:
     """
     Crear Security Group en BD y obtener su ID auto-generado
     
     Args:
         slice_id: ID del slice
+        zona: Zona de despliegue (linux u openstack)
         description: Descripción del SG
     
     Returns:
@@ -340,12 +341,12 @@ def create_sg_in_db(slice_id: int, description: str = "") -> int:
         
         # Insertar sin especificar 'name' aún (lo actualizaremos después con el ID)
         query = """
-        INSERT INTO security_groups (slice_id, name, description, rules, is_default)
-        VALUES (%s, %s, %s, %s, %s)
+        INSERT INTO security_groups (slice_id, name, description, rules, zona, is_default)
+        VALUES (%s, %s, %s, %s, %s, %s)
         """
         
         # Nombre temporal, lo actualizaremos con el ID real
-        cursor.execute(query, (slice_id, 'temp', description, rules_json, False))
+        cursor.execute(query, (slice_id, 'temp', description, rules_json, zona, False))
         connection.commit()
         
         # Obtener ID generado
@@ -357,7 +358,7 @@ def create_sg_in_db(slice_id: int, description: str = "") -> int:
         cursor.execute(update_query, (sg_name, sg_id))
         connection.commit()
         
-        logger.info(f"SG '{sg_name}' (ID {sg_id}) creado en BD para slice {slice_id}")
+        logger.info(f"SG '{sg_name}' (ID {sg_id}) creado en BD para slice {slice_id} en zona {zona}")
         
         return sg_id
         
@@ -2443,6 +2444,7 @@ async def create_custom_security_group(
             # Generar ID desde BD (modo recomendado)
             id_sg = create_sg_in_db(
                 slice_id=request.slice_id,
+                zona=zona,
                 description=f"Security Group personalizado para slice {request.slice_id}"
             )
             logger.info(f"ID {id_sg} generado automáticamente desde BD")
@@ -2980,7 +2982,7 @@ async def create_custom_sg_openstack(
         
         # SIEMPRE crear primero en BD para obtener id_sg autogenerado
         # create_sg_in_db crea con nombre temporal, luego lo actualiza a SG_{id_sg}
-        id_sg = create_sg_in_db(request.slice_id, request.descripcion)
+        id_sg = create_sg_in_db(request.slice_id, zona, request.descripcion)
         logger.info(f"SG creado en BD con ID autogenerado: {id_sg}, nombre: SG_{id_sg}")
         
         # Crear en OpenStack
@@ -3434,45 +3436,26 @@ async def delete_all_security_groups_of_slice(
         deleted_count = 0
         errors = []
         
-        # Eliminar cada security group
-        for sg in security_groups:
-            sg_name = sg['name']
-            is_default = sg['is_default']
-            
-            try:
-                # Llamar al orquestador para eliminar
-                if zona == 'linux':
-                    # Para Linux: llamar a remove-custom o remove-default
-                    endpoint = "/remove-default" if is_default else "/remove-custom"
-                    response = call_security_api(endpoint, {"slice_id": slice_id, "nombre": sg_name})
-                else:
-                    # Para OpenStack: llamar a remove-custom o remove-default
-                    endpoint = "/remove-default" if is_default else "/remove-custom"
-                    response = call_security_api_openstack(endpoint, {"slice_id": slice_id, "nombre": sg_name})
-                
-                if response.get('status_code') != 200:
-                    errors.append(f"Error eliminando {sg_name}: {response.get('error')}")
-                    continue
-                
-                deleted_count += 1
-                
-            except Exception as e:
-                errors.append(f"Error eliminando {sg_name}: {str(e)}")
+        # NOTA: No necesitamos obtener workers porque este endpoint se llama DESPUÉS
+        # de que el slice ya fue eliminado del cluster. Solo limpiamos la BD.
+        # Si se necesita eliminar del cluster también, el slice_manager ya lo hizo antes.
+        
+        logger.info(f"Saltando eliminación en cluster (ya fue eliminado). Solo limpiando BD.")
+        deleted_count = len(security_groups)
         
         # Eliminar de BD
-        cursor.execute("DELETE FROM security_groups WHERE slice_id = %s AND zona = %s", (slice_id, zona))
+        cursor.execute("DELETE FROM security_groups WHERE slice_id = %s", (slice_id,))
         connection.commit()
         cursor.close()
         connection.close()
         
-        logger.info(f"Security groups eliminados: {deleted_count}/{len(security_groups)}")
+        logger.info(f"Security groups eliminados de BD: {deleted_count}")
         
         return {
             "success": True,
-            "message": f"Security groups eliminados: {deleted_count}/{len(security_groups)}",
+            "message": f"Security groups eliminados de BD: {deleted_count}",
             "deleted_count": deleted_count,
-            "total": len(security_groups),
-            "errors": errors if errors else None
+            "total": len(security_groups)
         }
         
     except HTTPException:

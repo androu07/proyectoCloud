@@ -1,0 +1,15 @@
+[Unit]
+Description=OpenStack Security Groups API
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/env-scripts
+Environment="PATH=/usr/bin:/usr/local/bin"
+ExecStart=/usr/bin/python3 /home/ubuntu/env-scripts/security_api.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,585 @@
+{% extends 'base.html' %}
+
+{% block title %}Grupos de seguridad — G1{% endblock %}
+
+{% block content %}
+<style>
+  .main-content {
+    padding-top: 8px;
+  }
+
+  /* Breadcrumb */
+  .breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 20px;
+    font-size: 14px;
+    color: #64748b;
+  }
+
+  .breadcrumb a {
+    color: #64748b;
+    text-decoration: none;
+    transition: color 0.2s ease;
+  }
+
+  .breadcrumb a:hover {
+    color: #667eea;
+  }
+
+  .breadcrumb .separator {
+    color: #cbd5e1;
+  }
+
+  /* Page Header */
+  .page-header {
+    margin-bottom: 24px;
+  }
+
+  .page-title {
+    font-size: 28px;
+    font-weight: 500;
+    color: #333;
+    margin: 0;
+  }
+
+  /* Toolbar */
+  .toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    gap: 16px;
+  }
+
+  .search-container {
+    position: relative;
+    flex-grow: 1;
+    max-width: 400px;
+  }
+
+  .search-input {
+    width: 100%;
+    padding: 8px 36px 8px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 14px;
+    color: #374151;
+  }
+
+  .search-icon {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #9ca3af;
+    pointer-events: none;
+  }
+
+  .action-group {
+    display: flex;
+    gap: 8px;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-decoration: none;
+  }
+
+  /* Create Button: Purple */
+  .btn-create {
+    background: #667eea;
+    color: white;
+    border: 1px solid #667eea;
+  }
+
+  .btn-create:hover {
+    background: #5568d3;
+    border-color: #5568d3;
+    color: white;
+  }
+
+  /* Delete Button: Red */
+  .btn-delete {
+    background: #cf222e;
+    color: white;
+    border: 1px solid #cf222e;
+  }
+
+  .btn-delete:hover {
+    background: #a40e26;
+    border-color: #a40e26;
+    color: white;
+  }
+
+  /* Element Counter */
+  .element-counter {
+    background: #f3f4f6;
+    padding: 10px 16px;
+    border: 1px solid #e5e7eb;
+    border-bottom: none;
+    color: #4b5563;
+    font-size: 14px;
+  }
+
+  /* Table */
+  .table-container {
+    background: white;
+    border: 1px solid #e5e7eb;
+    overflow: hidden;
+  }
+
+  .groups-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .groups-table th {
+    background: #f3f4f6;
+    padding: 12px 16px;
+    text-align: left;
+    font-size: 14px;
+    font-weight: 700;
+    color: #1f2937;
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  .groups-table td {
+    padding: 14px 16px;
+    font-size: 14px;
+    color: #374151;
+    border-bottom: 1px solid #e5e7eb;
+    vertical-align: middle;
+  }
+
+  .groups-table tr:last-child td {
+    border-bottom: none;
+  }
+
+  .groups-table tr:hover {
+    background-color: #f9fafb;
+  }
+
+  .btn-manage {
+    background: #667eea;
+    color: white;
+    border: 1px solid #667eea;
+    padding: 6px 12px;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+  }
+
+  .btn-manage:hover {
+    background: #5568d3;
+    border-color: #5568d3;
+  }
+
+  .checkbox-col {
+    width: 40px;
+    text-align: center;
+  }
+
+  /* Modal Styles */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    justify-content: center;
+    align-items: center;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+
+  .modal-overlay.active {
+    display: flex;
+    opacity: 1;
+  }
+
+  .modal-container {
+    background: white;
+    width: 100%;
+    max-width: 500px;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    transform: translateY(-20px);
+    transition: transform 0.3s ease;
+    overflow: hidden;
+  }
+
+  .modal-overlay.active .modal-container {
+    transform: translateY(0);
+  }
+
+  .modal-header {
+    padding: 16px 24px;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .modal-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #1f2937;
+    margin: 0;
+  }
+
+  .modal-close {
+    background: none;
+    border: none;
+    color: #6b7280;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    transition: background 0.2s;
+  }
+
+  .modal-close:hover {
+    background: #f3f4f6;
+    color: #374151;
+  }
+
+  .modal-body {
+    padding: 24px;
+  }
+
+  .form-group {
+    margin-bottom: 16px;
+  }
+
+  .form-label {
+    display: block;
+    font-size: 14px;
+    font-weight: 500;
+    color: #374151;
+    margin-bottom: 6px;
+  }
+
+  .form-input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 14px;
+    transition: border-color 0.2s;
+    box-sizing: border-box;
+  }
+
+  .form-input:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+  }
+
+  .form-textarea {
+    min-height: 100px;
+    resize: vertical;
+  }
+
+  .modal-footer {
+    padding: 16px 24px;
+    background: #f9fafb;
+    border-top: 1px solid #e5e7eb;
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+  }
+
+  .btn-cancel {
+    background: white;
+    border: 1px solid #d1d5db;
+    color: #374151;
+  }
+
+  .btn-cancel:hover {
+    background: #f3f4f6;
+    border-color: #9ca3af;
+  }
+</style>
+
+<!-- Breadcrumb -->
+<div class="breadcrumb">
+  <a href="#">Proyecto</a>
+  <span class="separator">/</span>
+  <a href="#">Red</a>
+  <span class="separator">/</span>
+  <span style="color: #9ca3af;">Grupos de seguridad</span>
+</div>
+
+<!-- Page Header -->
+<div class="page-header">
+  <h1 class="page-title">Grupos de seguridad</h1>
+</div>
+
+<!-- Toolbar -->
+<div class="toolbar">
+  <div class="search-container">
+    <input type="text" class="search-input" placeholder="Filtrar">
+    <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2">
+      <circle cx="11" cy="11" r="8"></circle>
+      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+    </svg>
+  </div>
+  <div class="action-group">
+    <a href="#" class="btn btn-create" id="createGroupBtn">
+      <span style="font-weight:bold; font-size:16px;">+</span> Crear grupo de seguridad
+    </a>
+    <button class="btn btn-delete">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        style="margin-right:4px;">
+        <polyline points="3 6 5 6 21 6"></polyline>
+        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+      </svg>
+      Eliminar Grupos de Seguridad
+    </button>
+  </div>
+</div>
+
+<!-- Element Counter -->
+<div class="element-counter">Mostrando 2 elementos</div>
+
+<!-- Table -->
+<div class="table-container">
+  <table class="groups-table">
+    <thead>
+      <tr>
+        <th class="checkbox-col"><input type="checkbox" id="selectAll"></th>
+        <th>Name</th>
+        <th>Slice ID</th>
+        <th>Description</th>
+        <th style="text-align: right;">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% if groups %}
+        {% for group in groups %}
+        <tr>
+          <td class="checkbox-col">
+            {% if not group.is_default %}
+            <input type="checkbox" class="group-checkbox" data-group-id="{{ group.id }}" data-group-name="{{ group.name }}">
+            {% endif %}
+          </td>
+          <td style="font-weight: 500;">
+            {{ group.name }}
+            {% if group.is_default %}
+            <span style="color: #6b7280; font-size: 0.875rem; font-weight: 400;"> (default)</span>
+            {% endif %}
+          </td>
+          <td>{{ group.slice_id }}</td>
+          <td>{{ group.description or 'Sin descripción' }}</td>
+          <td style="text-align: right;">
+            <a href="{{ url_for('security_group_detail', group_id=group.id, group_name=group.name, description=group.description or '') }}"
+              class="btn-manage">Administrar reglas</a>
+          </td>
+        </tr>
+        {% endfor %}
+      {% else %}
+        <tr>
+          <td colspan="5" style="text-align: center; padding: 2rem; color: #6b7280;">
+            No hay security groups creados
+          </td>
+        </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Bottom Counter -->
+<div class="element-counter" style="border-top: none; border-bottom: 1px solid #e5e7eb;">
+  Mostrando {{ groups|length }} elemento{{ 's' if groups|length != 1 else '' }}
+</div>
+
+<!-- Modal -->
+<!-- Modal de confirmación -->
+<div class="modal-overlay" id="deleteConfirmModal">
+  <div class="modal-container">
+    <div class="modal-header">
+      <span class="modal-title">Confirmar eliminación</span>
+      <button class="modal-close" id="closeDeleteConfirm">&times;</button>
+    </div>
+    <div class="modal-body">
+      ¿Estás seguro de que deseas eliminar los grupos de seguridad seleccionados?
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-cancel" id="cancelDeleteBtn">Cancelar</button>
+      <button class="btn btn-delete" id="confirmDeleteBtn">Eliminar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal de advertencia -->
+<div class="modal-overlay" id="noSelectionModal">
+  <div class="modal-container">
+    <div class="modal-header">
+      <span class="modal-title">Sin selección</span>
+      <button class="modal-close" id="closeNoSelection">&times;</button>
+    </div>
+    <div class="modal-body">
+      No hay ningún grupo de seguridad seleccionado.
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-cancel" id="acceptNoSelection">Aceptar</button>
+    </div>
+  </div>
+</div>
+<div class="modal-overlay" id="createGroupModal">
+  <div class="modal-container">
+    <div class="modal-header">
+      <h3 class="modal-title">Crear Grupo de Seguridad</h3>
+      <button class="modal-close" id="closeModalBtn">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Nombre</label>
+        <input type="text" class="form-input" placeholder="Ej: sg-web-server">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Descripción</label>
+        <textarea class="form-input form-textarea" placeholder="Descripción del grupo de seguridad..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-cancel" id="cancelModalBtn">Cancelar</button>
+      <button class="btn btn-create" id="confirmCreateBtn">Crear</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    // Select All checkbox functionality
+    var selectAllCheckbox = document.getElementById('selectAll');
+    var groupCheckboxes = document.querySelectorAll('.group-checkbox');
+    
+    if (selectAllCheckbox) {
+      selectAllCheckbox.addEventListener('change', function() {
+        groupCheckboxes.forEach(function(checkbox) {
+          checkbox.checked = selectAllCheckbox.checked;
+        });
+      });
+    }
+    
+    // Update select all state when individual checkboxes change
+    groupCheckboxes.forEach(function(checkbox) {
+      checkbox.addEventListener('change', function() {
+        var allChecked = Array.from(groupCheckboxes).every(cb => cb.checked);
+        var someChecked = Array.from(groupCheckboxes).some(cb => cb.checked);
+        
+        if (selectAllCheckbox) {
+          selectAllCheckbox.checked = allChecked;
+          selectAllCheckbox.indeterminate = someChecked && !allChecked;
+        }
+      });
+    });
+    
+    // Eliminar grupos de seguridad
+    var deleteBtn = document.querySelector('.btn-delete');
+    var confirmModal = document.getElementById('deleteConfirmModal');
+    var noSelectionModal = document.getElementById('noSelectionModal');
+    var closeDeleteConfirm = document.getElementById('closeDeleteConfirm');
+    var closeNoSelection = document.getElementById('closeNoSelection');
+    var cancelDeleteBtn = document.getElementById('cancelDeleteBtn');
+    var confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
+    var acceptNoSelection = document.getElementById('acceptNoSelection');
+
+    deleteBtn.addEventListener('click', function(e) {
+      e.preventDefault();
+      var selected = Array.from(groupCheckboxes).some(cb => cb.checked);
+      if (selected) {
+        confirmModal.classList.add('active');
+      } else {
+        noSelectionModal.classList.add('active');
+      }
+    });
+
+    // Cerrar modales
+    [closeDeleteConfirm, cancelDeleteBtn].forEach(btn => {
+      btn.addEventListener('click', function() {
+        confirmModal.classList.remove('active');
+      });
+    });
+    [closeNoSelection, acceptNoSelection].forEach(btn => {
+      btn.addEventListener('click', function() {
+        noSelectionModal.classList.remove('active');
+      });
+    });
+
+    // Confirmar eliminación (aquí iría la lógica real)
+    if (confirmDeleteBtn) {
+      confirmDeleteBtn.addEventListener('click', function() {
+        confirmModal.classList.remove('active');
+        alert('Grupos de seguridad eliminados (simulado).');
+        // Aquí puedes agregar la lógica real de eliminación
+      });
+    }
+  });
+  // Simple search filter
+  document.querySelector('.search-input').addEventListener('input', function (e) {
+    const term = e.target.value.toLowerCase();
+    const rows = document.querySelectorAll('.groups-table tbody tr');
+
+    rows.forEach(row => {
+      const text = row.textContent.toLowerCase();
+      row.style.display = text.includes(term) ? '' : 'none';
+    });
+  });
+
+  // Modal Logic
+  const modal = document.getElementById('createGroupModal');
+  const createBtn = document.getElementById('createGroupBtn');
+  const closeBtn = document.getElementById('closeModalBtn');
+  const cancelBtn = document.getElementById('cancelModalBtn');
+  const confirmBtn = document.getElementById('confirmCreateBtn');
+
+  function openModal(e) {
+    if (e) e.preventDefault();
+    modal.classList.add('active');
+  }
+
+  function closeModal() {
+    modal.classList.remove('active');
+  }
+
+  createBtn.addEventListener('click', openModal);
+  closeBtn.addEventListener('click', closeModal);
+  cancelBtn.addEventListener('click', closeModal);
+
+  // Close on click outside
+  modal.addEventListener('click', function (e) {
+    if (e.target === modal) {
+      closeModal();
+    }
+  });
+
+  // Confirm action (No backend action as requested)
+  confirmBtn.addEventListener('click', function () {
+    // Just close for now
+    closeModal();
+  });
+</script>
+{% endblock %}

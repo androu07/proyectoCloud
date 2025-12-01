@@ -1,0 +1,539 @@
+{% extends 'base.html' %}
+
+{% block title %}Imágenes — G1{% endblock %}
+
+{% block content %}
+<style>
+  /* Copiado de index.html para mantener el estilo */
+  .main-content { padding-top: 8px; }
+  .breadcrumb { display: flex; align-items: center; gap: 8px; margin-bottom: 20px; font-size: 14px; color: #64748b; }
+  .breadcrumb a { color: #64748b; text-decoration: none; transition: color 0.2s ease; }
+  .breadcrumb a:hover { color: #667eea; }
+  .breadcrumb .separator { color: #cbd5e1; }
+  .page-header { margin-bottom: 24px; }
+  .page-title { font-size: 28px; font-weight: 500; color: #333; margin: 0; }
+  .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; gap: 16px; }
+  .search-container { position: relative; flex-grow: 1; max-width: 400px; }
+  .search-input { width: 100%; padding: 8px 36px 8px 12px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 14px; color: #374151; }
+  .search-icon { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: #9ca3af; pointer-events: none; }
+  .action-group { display: flex; gap: 8px; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 4px; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s; text-decoration: none; }
+  .btn-import { background: #667eea; color: white; border: 1px solid #667eea; }
+  .btn-import:hover { background: #5568d3; border-color: #5568d3; color: white; }
+  .element-counter { background: #f3f4f6; padding: 10px 16px; border: 1px solid #e5e7eb; border-bottom: none; color: #4b5563; font-size: 14px; }
+  .table-container { background: white; border: 1px solid #e5e7eb; overflow: hidden; }
+  .images-table { width: 100%; border-collapse: collapse; }
+  .images-table th { background: #f3f4f6; padding: 12px 16px; text-align: left; font-size: 14px; font-weight: 700; color: #1f2937; border-bottom: 1px solid #e5e7eb; }
+  .images-table td { padding: 14px 16px; font-size: 14px; color: #374151; border-bottom: 1px solid #e5e7eb; vertical-align: middle; }
+  .images-table tr:last-child td { border-bottom: none; }
+  .images-table tr:hover { background-color: #f9fafb; }
+  .btn-import-dropdown { position: relative; }
+  .import-options { display: none; position: absolute; right: 0; top: 100%; background: white; border: 1px solid #e5e7eb; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); min-width: 160px; z-index: 10; }
+  .import-options button { width: 100%; background: none; border: none; padding: 10px 16px; text-align: left; font-size: 14px; color: #374151; cursor: pointer; }
+  .import-options button:hover { background: #f3f4f6; }
+  
+  /* Loading state */
+  .loading-state { text-align: center; padding: 60px 20px; background: white; border: 1px solid #e5e7eb; }
+  .spinner { border: 3px solid #f3f4f6; border-top: 3px solid #667eea; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 16px; }
+  @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+  .loading-state p { color: #6b7280; font-size: 14px; }
+</style>
+
+<!-- Breadcrumb -->
+<div class="breadcrumb">
+  <a href="#">Proyecto</a>
+  <span class="separator">/</span>
+  <span style="color: #9ca3af;">Imágenes</span>
+</div>
+
+<!-- Page Header -->
+<div class="page-header">
+  <h1 class="page-title">Imágenes</h1>
+</div>
+
+<!-- Toolbar -->
+<div class="toolbar">
+  <div class="search-container">
+    <input type="text" class="search-input" placeholder="Filtrar">
+    <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="11" cy="11" r="8"></circle>
+      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+    </svg>
+  </div>
+  <div class="action-group">
+    <div class="btn-import-dropdown">
+      <button class="btn btn-import" onclick="toggleImportOptions()">Importar</button>
+      <div class="import-options" id="importOptions">
+        <button onclick="showImportUrlModal()">Con URL</button>
+        <button onclick="showImportFileModal()">Con Archivo</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Element Counter -->
+<div class="element-counter" id="imageCounter">Mostrando 0 elementos</div>
+
+<!-- Loading State -->
+<div class="loading-state" id="loadingState">
+  <div class="spinner"></div>
+  <p>Cargando imágenes...</p>
+</div>
+
+<!-- Table Container -->
+<div class="table-container" id="tableContainer" style="display: none;">
+  <table class="images-table">
+    <thead>
+      <tr>
+        <th>Nombre</th>
+        <th>Formato</th>
+        <th>Tamaño</th>
+        <th>Descripción</th>
+        <th>Creación</th>
+        <th>Acciones</th>
+      </tr>
+    </thead>
+    <tbody id="imagesTableBody">
+    </tbody>
+  </table>
+</div>
+
+<!-- Empty State -->
+<div class="empty-state" id="emptyState" style="display: none;">
+  <div class="empty-icon">
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+      <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+      <rect x="14" y="14" width="7" height="7" rx="1"></rect>
+      <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+    </svg>
+  </div>
+  <h2>No hay imágenes</h2>
+  <p>Importa tu primera imagen</p>
+  <button class="btn btn-import" onclick="toggleImportOptions()">Importar imagen</button>
+</div>
+
+<!-- Modals para importar -->
+<div id="importUrlModal" class="modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
+  <div class="modal-content" style="background:white;border-radius:8px;width:90%;max-width:500px;box-shadow:0 4px 20px rgba(0,0,0,0.15);">
+    <div class="modal-header" style="padding:20px;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;">
+      <h3 style="margin:0;font-size:18px;font-weight:600;">Importar imagen por URL</h3>
+      <button class="modal-close" onclick="closeImportUrlModal()" style="background:none;border:none;font-size:24px;cursor:pointer;color:#9ca3af;">&times;</button>
+    </div>
+    <div class="modal-body" style="padding:24px;">
+      <label for="nombreUrl" style="display:block;margin-bottom:8px;font-weight:500;font-size:14px;">Nombre de la imagen:</label>
+      <input type="text" id="nombreUrl" placeholder="ubuntu-22.04" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:4px;font-size:14px;margin-bottom:16px;" maxlength="30" required>
+      
+      <label for="descripcionUrl" style="display:block;margin-bottom:8px;font-weight:500;font-size:14px;">Descripción:</label>
+      <input type="text" id="descripcionUrl" placeholder="Ubuntu 22.04 LTS" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:4px;font-size:14px;margin-bottom:16px;" maxlength="100">
+      
+      <label for="urlInput" style="display:block;margin-bottom:8px;font-weight:500;font-size:14px;">URL de la imagen:</label>
+      <input type="url" id="urlInput" placeholder="https://ejemplo.com/imagen.img" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:4px;font-size:14px;" required>
+      
+      <div id="urlFeedback" style="margin-top:12px;padding:12px;background:#fee2e2;border:1px solid #fecaca;border-radius:4px;color:#dc2626;font-size:13px;display:none;"></div>
+      <div id="urlProgress" style="margin-top:12px;display:none;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <div class="spinner" style="width:20px;height:20px;border-width:2px;"></div>
+          <span style="font-size:14px;color:#6b7280;">Importando imagen...</span>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer" style="padding:16px 24px;border-top:1px solid #e5e7eb;display:flex;justify-content:flex-end;gap:8px;">
+      <button class="btn btn-secondary" onclick="closeImportUrlModal()" style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db;">Cancelar</button>
+      <button class="btn btn-import" id="btnImportUrl" onclick="submitUrlImport()">Importar</button>
+    </div>
+  </div>
+</div>
+
+<div id="importFileModal" class="modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
+  <div class="modal-content" style="background:white;border-radius:8px;width:90%;max-width:500px;box-shadow:0 4px 20px rgba(0,0,0,0.15);">
+    <div class="modal-header" style="padding:20px;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;">
+      <h3 style="margin:0;font-size:18px;font-weight:600;">Importar imagen por archivo</h3>
+      <button class="modal-close" onclick="closeImportFileModal()" style="background:none;border:none;font-size:24px;cursor:pointer;color:#9ca3af;">&times;</button>
+    </div>
+    <div class="modal-body" style="padding:24px;">
+      <label for="nombreFile" style="display:block;margin-bottom:8px;font-weight:500;font-size:14px;">Nombre de la imagen:</label>
+      <input type="text" id="nombreFile" placeholder="ubuntu-22.04" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:4px;font-size:14px;margin-bottom:16px;" maxlength="30" required>
+      
+      <label for="descripcionFile" style="display:block;margin-bottom:8px;font-weight:500;font-size:14px;">Descripción:</label>
+      <input type="text" id="descripcionFile" placeholder="Ubuntu 22.04 LTS" style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:4px;font-size:14px;margin-bottom:16px;" maxlength="100">
+      
+      <label for="fileInput" style="display:block;width:100%;text-align:center;cursor:pointer;padding:32px;border:2px dashed #667eea;border-radius:8px;background:#f3f4f6;transition:all 0.2s;">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#667eea" stroke-width="2" style="margin:0 auto 12px;display:block;"><path d="M12 19V6M5 12l7-7 7 7"/></svg>
+        <span id="fileLabel" style="font-size:14px;color:#374151;">Arrastra el archivo aquí o haz clic para seleccionar</span>
+        <input type="file" id="fileInput" name="file" accept=".img,.iso,.qcow2,.raw,.zip,.tar,.gz" style="display:none;" onchange="handleFileSelect(this)">
+      </label>
+      
+      <div id="filePreview" style="display:none;margin-top:12px;padding:12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:4px;font-size:13px;color:#16a34a;"></div>
+      <div id="fileFeedback" style="margin-top:12px;padding:12px;background:#fee2e2;border:1px solid #fecaca;border-radius:4px;color:#dc2626;font-size:13px;display:none;"></div>
+      <div id="fileProgress" style="margin-top:12px;display:none;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <div class="spinner" style="width:20px;height:20px;border-width:2px;"></div>
+          <span style="font-size:14px;color:#6b7280;">Subiendo imagen...</span>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer" style="padding:16px 24px;border-top:1px solid #e5e7eb;display:flex;justify-content:flex-end;gap:8px;">
+      <button class="btn btn-secondary" onclick="closeImportFileModal()" style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db;">Cancelar</button>
+      <button class="btn btn-import" id="btnUploadFile" onclick="submitFileUpload()">Importar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal de confirmación de borrado -->
+<div id="deleteConfirmModal" class="modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;">
+  <div class="modal-content" style="background:white;border-radius:8px;width:90%;max-width:450px;box-shadow:0 4px 20px rgba(0,0,0,0.15);">
+    <div class="modal-header" style="padding:20px;border-bottom:1px solid #e5e7eb;display:flex;flex-direction:column;align-items:center;gap:12px;">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2">
+        <circle cx="12" cy="12" r="10"></circle>
+        <line x1="12" y1="8" x2="12" y2="12"></line>
+        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+      </svg>
+      <h3 style="margin:0;font-size:18px;font-weight:600;color:#dc2626;">Confirmar eliminación</h3>
+    </div>
+    <div class="modal-body" style="padding:24px;text-align:center;">
+      <p style="margin:0 0 12px 0;font-size:14px;color:#374151;">¿Estás seguro de eliminar la imagen <strong id="deleteImageName"></strong>?</p>
+      <p style="margin:0;font-size:13px;color:#6b7280;">Esta acción no se puede deshacer</p>
+    </div>
+    <div class="modal-footer" style="padding:16px 24px;border-top:1px solid #e5e7eb;display:flex;justify-content:flex-end;gap:8px;">
+      <button class="btn btn-secondary" onclick="closeDeleteModal()" style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db;">Cancelar</button>
+      <button class="btn btn-danger" id="btnConfirmDelete" onclick="executeDelete()" style="background:#ef4444;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-size:14px;font-weight:500;">Eliminar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+var imageToDelete = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+  loadImages();
+});
+
+function loadImages() {
+  document.getElementById('loadingState').style.display = 'block';
+  document.getElementById('tableContainer').style.display = 'none';
+  document.getElementById('emptyState').style.display = 'none';
+
+  fetch('/api/images/list', {
+    method: 'GET',
+    credentials: 'same-origin',
+    headers: {'Content-Type': 'application/json'}
+  })
+  .then(response => {
+    if (response.redirected && response.url.includes('/login')) {
+      window.location.href = '/login';
+      return null;
+    }
+    if (response.status === 401 || response.status === 302) {
+      window.location.href = '/login';
+      return null;
+    }
+    if (!response.ok) {
+      throw new Error('HTTP error! status: ' + response.status);
+    }
+    return response.json();
+  })
+  .then(data => {
+    if (!data) return;
+    document.getElementById('loadingState').style.display = 'none';
+    
+    if (data.success && data.images && data.images.length > 0) {
+      populateImagesTable(data.images);
+      document.getElementById('imageCounter').textContent = 'Mostrando ' + data.total_images + ' elementos';
+      document.getElementById('tableContainer').style.display = 'block';
+    } else {
+      document.getElementById('imageCounter').textContent = 'Mostrando 0 elementos';
+      document.getElementById('emptyState').style.display = 'block';
+    }
+  })
+  .catch(error => {
+    console.error('Error loading images:', error);
+    document.getElementById('loadingState').style.display = 'none';
+    document.getElementById('emptyState').style.display = 'block';
+    document.getElementById('emptyState').innerHTML = '<div class="empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg></div><h2>Error al cargar imágenes</h2><p>' + (error.message || 'Hubo un problema al conectar con el servidor') + '</p><button class="btn btn-import" onclick="loadImages()">Reintentar</button>';
+  });
+}
+
+function populateImagesTable(images) {
+  var tbody = document.getElementById('imagesTableBody');
+  tbody.innerHTML = '';
+  
+  images.forEach(function(image) {
+    var row = document.createElement('tr');
+    row.setAttribute('data-id', image.id);
+    row.setAttribute('data-openstack-id', image.id_openstack || '');
+    
+    var formattedDate = 'N/A';
+    if (image.fecha_importacion) {
+      var date = new Date(image.fecha_importacion);
+      formattedDate = date.toLocaleString('es-ES', {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'});
+    }
+    
+    var sizeFormatted = 'N/A';
+    if (image.tamano_gb !== null && image.tamano_gb !== undefined) {
+      sizeFormatted = parseFloat(image.tamano_gb).toFixed(2) + ' GB';
+    }
+    
+    var deleteBtn = '<button class="btn-delete" onclick="confirmDeleteImage(' + image.id + ', \'' + (image.nombre || 'Sin nombre').replace(/'/g, "\\'") + '\')" style="background:#ef4444;color:white;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:14px;">Eliminar</button>';
+    
+    row.innerHTML = '<td>' + (image.nombre || 'Sin nombre') + '</td><td>' + (image.formato || 'N/A') + '</td><td>' + sizeFormatted + '</td><td>' + (image.descripcion || 'Sin descripción') + '</td><td>' + formattedDate + '</td><td>' + deleteBtn + '</td>';
+    tbody.appendChild(row);
+  });
+  
+  setupSearch();
+}
+
+function setupSearch() {
+  var searchInput = document.querySelector('.search-input');
+  if (searchInput) {
+    searchInput.addEventListener('input', function() {
+      var term = this.value.toLowerCase();
+      var rows = document.querySelectorAll('.images-table tbody tr');
+      rows.forEach(function(row) {
+        var text = row.textContent.toLowerCase();
+        row.style.display = text.includes(term) ? '' : 'none';
+      });
+    });
+  }
+}
+
+function toggleImportOptions() {
+  var options = document.getElementById('importOptions');
+  options.style.display = options.style.display === 'block' ? 'none' : 'block';
+}
+
+function showImportUrlModal() {
+  document.getElementById('importUrlModal').style.display = 'flex';
+  document.getElementById('importOptions').style.display = 'none';
+}
+
+function closeImportUrlModal() {
+  document.getElementById('importUrlModal').style.display = 'none';
+}
+
+function showImportFileModal() {
+  document.getElementById('importFileModal').style.display = 'flex';
+  document.getElementById('importOptions').style.display = 'none';
+}
+
+function closeImportFileModal() {
+  document.getElementById('importFileModal').style.display = 'none';
+  document.getElementById('nombreFile').value = '';
+  document.getElementById('descripcionFile').value = '';
+  document.getElementById('fileInput').value = '';
+  document.getElementById('filePreview').style.display = 'none';
+  document.getElementById('fileFeedback').style.display = 'none';
+  document.getElementById('fileProgress').style.display = 'none';
+  document.getElementById('fileLabel').textContent = 'Arrastra el archivo aquí o haz clic para seleccionar';
+}
+
+function handleFileSelect(input) {
+  var file = input.files[0];
+  if (file) {
+    var preview = document.getElementById('filePreview');
+    preview.textContent = 'Archivo seleccionado: ' + file.name + ' (' + (file.size / 1024 / 1024).toFixed(2) + ' MB)';
+    preview.style.display = 'block';
+    
+    if (!document.getElementById('nombreFile').value) {
+      document.getElementById('nombreFile').value = file.name.split('.')[0];
+    }
+  }
+}
+
+function submitUrlImport() {
+  var nombre = document.getElementById('nombreUrl').value.trim();
+  var descripcion = document.getElementById('descripcionUrl').value.trim();
+  var url = document.getElementById('urlInput').value.trim();
+  var feedback = document.getElementById('urlFeedback');
+  var progress = document.getElementById('urlProgress');
+  var btn = document.getElementById('btnImportUrl');
+  
+  feedback.style.display = 'none';
+  
+  if (!nombre || !url) {
+    feedback.textContent = 'Nombre y URL son obligatorios';
+    feedback.style.display = 'block';
+    return;
+  }
+  
+  if (!url.match(/^https?:\/\/.+/)) {
+    feedback.textContent = 'URL inválida. Debe comenzar con http:// o https://';
+    feedback.style.display = 'block';
+    return;
+  }
+  
+  btn.disabled = true;
+  btn.style.opacity = '0.6';
+  progress.style.display = 'block';
+  
+  fetch('/api/images/import-url', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({nombre: nombre, descripcion: descripcion || 'Imagen importada', url: url})
+  })
+  .then(response => response.json())
+  .then(data => {
+    progress.style.display = 'none';
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    
+    if (data.success) {
+      closeImportUrlModal();
+      alert('Imagen importada exitosamente');
+      loadImages();
+    } else {
+      var errorMsg = data.message || 'Error al importar imagen';
+      if (typeof errorMsg === 'object') {
+        errorMsg = JSON.stringify(errorMsg);
+      }
+      feedback.textContent = errorMsg;
+      feedback.style.display = 'block';
+    }
+  })
+  .catch(error => {
+    progress.style.display = 'none';
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    feedback.textContent = 'Error de conexión: ' + error.message;
+    feedback.style.display = 'block';
+  });
+}
+
+function submitFileUpload() {
+  var nombre = document.getElementById('nombreFile').value.trim();
+  var descripcion = document.getElementById('descripcionFile').value.trim();
+  var fileInput = document.getElementById('fileInput');
+  var feedback = document.getElementById('fileFeedback');
+  var progress = document.getElementById('fileProgress');
+  var btn = document.getElementById('btnUploadFile');
+  
+  feedback.style.display = 'none';
+  
+  if (!nombre) {
+    feedback.textContent = 'El nombre es obligatorio';
+    feedback.style.display = 'block';
+    return;
+  }
+  
+  if (!fileInput.files || fileInput.files.length === 0) {
+    feedback.textContent = 'Debes seleccionar un archivo';
+    feedback.style.display = 'block';
+    return;
+  }
+  
+  var formData = new FormData();
+  formData.append('nombre', nombre);
+  formData.append('descripcion', descripcion || 'Imagen subida desde archivo');
+  formData.append('file', fileInput.files[0]);
+  
+  btn.disabled = true;
+  btn.style.opacity = '0.6';
+  progress.style.display = 'block';
+  
+  fetch('/api/images/upload-file', {
+    method: 'POST',
+    credentials: 'same-origin',
+    body: formData
+  })
+  .then(response => response.json())
+  .then(data => {
+    progress.style.display = 'none';
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    
+    if (data.success) {
+      closeImportFileModal();
+      alert('Imagen subida exitosamente');
+      loadImages();
+    } else {
+      var errorMsg = data.message || 'Error al subir imagen';
+      if (typeof errorMsg === 'object') {
+        errorMsg = JSON.stringify(errorMsg);
+      }
+      feedback.textContent = errorMsg;
+      feedback.style.display = 'block';
+    }
+  })
+  .catch(error => {
+    progress.style.display = 'none';
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    feedback.textContent = 'Error de conexión: ' + error.message;
+    feedback.style.display = 'block';
+  });
+}
+
+function confirmDeleteImage(imageId, imageName) {
+  imageToDelete = imageId;
+  document.getElementById('deleteImageName').textContent = '"' + imageName + '"';
+  document.getElementById('deleteConfirmModal').style.display = 'flex';
+}
+
+function closeDeleteModal() {
+  document.getElementById('deleteConfirmModal').style.display = 'none';
+  imageToDelete = null;
+}
+
+function executeDelete() {
+  if (!imageToDelete) return;
+  
+  var btnConfirm = document.getElementById('btnConfirmDelete');
+  btnConfirm.disabled = true;
+  btnConfirm.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px;margin-right:8px;"></span>Eliminando...';
+  
+  deleteImage(imageToDelete);
+}
+
+function deleteImage(imageId) {
+  fetch('/api/images/delete/' + imageId, {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json'
+    }
+  })
+  .then(response => {
+    if (response.redirected && response.url.includes('/login')) {
+      window.location.href = '/login';
+      return null;
+    }
+    if (response.status === 401 || response.status === 302) {
+      window.location.href = '/login';
+      return null;
+    }
+    if (!response.ok) {
+      throw new Error('HTTP error! status: ' + response.status);
+    }
+    return response.json();
+  })
+  .then(data => {
+    if (!data) return;
+    
+    closeDeleteModal();
+    
+    if (data.success) {
+      alert('Imagen eliminada exitosamente');
+      loadImages();
+    } else {
+      var errorMsg = data.message || 'Error al eliminar imagen';
+      if (typeof errorMsg === 'object') {
+        errorMsg = JSON.stringify(errorMsg);
+      }
+      alert(errorMsg);
+    }
+  })
+  .catch(error => {
+    console.error('Error deleting image:', error);
+    closeDeleteModal();
+    alert('Error de conexión: ' + error.message);
+  })
+  .finally(function() {
+    var btnConfirm = document.getElementById('btnConfirmDelete');
+    if (btnConfirm) {
+      btnConfirm.disabled = false;
+      btnConfirm.textContent = 'Eliminar';
+    }
+  });
+}
+</script>
+{% endblock %}

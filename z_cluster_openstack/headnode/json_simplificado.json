@@ -1,0 +1,29 @@
+{
+  "json_config": {
+    "zona_despliegue": "openstack",
+    "id_slice": "98",
+    "vms": [
+      {
+        "nombre": "vm1",
+        "image": "ad737fe6-4a3b-42de-a3b9-324a0aaa563c",
+        "conexiones_vlans": "11",
+        "server": "worker4",
+        "id_flavor_openstack": "4ca10e44-bb14-4117-baac-fb9449dbb6cc"
+      },
+      {
+        "nombre": "vm2",
+        "image": "ad737fe6-4a3b-42de-a3b9-324a0aaa563c",
+        "conexiones_vlans": "11",
+        "server": "worker4",
+        "id_flavor_openstack": "4ca10e44-bb14-4117-baac-fb9449dbb6cc"
+      },
+      {
+        "nombre": "vm3",
+        "image": "ad737fe6-4a3b-42de-a3b9-324a0aaa563c",
+        "conexiones_vlans": "11",
+        "server": "worker5",
+        "id_flavor_openstack": "4ca10e44-bb14-4117-baac-fb9449dbb6cc"
+      }
+    ]
+  }
+}

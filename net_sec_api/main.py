@@ -424,10 +424,10 @@ def process_vlan_mapping(slice_id: int, zona_despliegue: str):
         # ========== CREAR Security Group default en BD ==========
         try:
             logger.info(f"[NET_SEC] Slice {slice_id}: Inicializando Security Groups...")
-            result = create_default_security_group(slice_id)
+            result = create_default_security_group(slice_id, zona_despliegue)
             
             if result:
-                logger.info(f"[NET_SEC] Slice {slice_id}: Security Group creado - ID {result.get('id')}")
+                logger.info(f"[NET_SEC] Slice {slice_id}: Security Group creado - ID {result.get('id')} en zona {zona_despliegue}")
             else:
                 logger.warning(f"[NET_SEC] Slice {slice_id}: Error creando Security Group (no crítico)")
         except Exception as sg_error:
@@ -848,20 +848,24 @@ async def apply_security_group_to_workers(sg_id: int, request: ApplySecurityGrou
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/security-groups/initialize/{slice_id}")
-async def initialize_default_security_group(slice_id: int):
+async def initialize_default_security_group(slice_id: int, zona: str):
     """
     Crear Security Group 'default' para un slice nuevo
     Llamado automáticamente cuando se crea un slice
+    
+    Args:
+        slice_id: ID del slice
+        zona: 'linux' u 'openstack' (requerido como query parameter)
     """
     try:
-        result = create_default_security_group(slice_id)
+        result = create_default_security_group(slice_id, zona)
         
         if not result:
             raise HTTPException(status_code=500, detail="Error creando Security Group default")
         
         return {
             "success": True,
-            "message": f"Security Group 'default' inicializado para slice {slice_id}",
+            "message": f"Security Group 'default' inicializado para slice {slice_id} en zona {zona}",
             "security_group": result
         }
         
@@ -1026,16 +1030,24 @@ async def map_vlans(request: VlanMappingRequest):
 
 # ==================== FUNCIONES DE SECURITY GROUPS ====================
 
-def create_default_security_group(slice_id: int) -> Dict:
+def create_default_security_group(slice_id: int, zona: str) -> Dict:
     """
     Crea el Security Group 'default' para un slice nuevo
-    Copia las reglas del template (slice_id = 0)
+    Copia las reglas del template (slice_id = 0, zona = NULL)
+    
+    Args:
+        slice_id: ID del slice (debe ser > 0)
+        zona: 'linux' u 'openstack' (requerido)
     """
+    if not zona or zona not in ['linux', 'openstack']:
+        logger.error(f"Zona inválida: {zona}. Debe ser 'linux' u 'openstack'")
+        return None
+        
     try:
         connection = mysql.connector.connect(**SG_DB_CONFIG)
         cursor = connection.cursor(dictionary=True)
         
-        # Obtener template default
+        # Obtener template default (slice_id = 0, zona = NULL)
         cursor.execute("SELECT rules FROM security_groups WHERE slice_id = 0 AND name = 'default'")
         template = cursor.fetchone()
         
@@ -1045,12 +1057,13 @@ def create_default_security_group(slice_id: int) -> Dict:
             connection.close()
             return None
         
-        # Crear SG default para el slice con is_default=TRUE
+        # Crear SG default para el slice con is_default=TRUE e incluir zona
         insert_query = """
-            INSERT INTO security_groups (slice_id, name, description, rules, is_default)
-            VALUES (%s, %s, %s, %s, TRUE)
+            INSERT INTO security_groups (slice_id, name, description, rules, zona, is_default)
+            VALUES (%s, %s, %s, %s, %s, TRUE)
             ON DUPLICATE KEY UPDATE
                 rules = VALUES(rules),
+                zona = VALUES(zona),
                 is_default = TRUE,
                 updated_at = CURRENT_TIMESTAMP
         """
@@ -1059,7 +1072,8 @@ def create_default_security_group(slice_id: int) -> Dict:
             slice_id,
             'default',
             f'Security group por defecto del slice {slice_id}',
-            template['rules']
+            template['rules'],
+            zona
         ))
         
         connection.commit()
@@ -1068,8 +1082,8 @@ def create_default_security_group(slice_id: int) -> Dict:
         cursor.close()
         connection.close()
         
-        logger.info(f"✓ Security Group 'default' creado para slice {slice_id} (id={sg_id})")
-        return {'id': sg_id, 'name': 'default', 'slice_id': slice_id}
+        logger.info(f"✓ Security Group 'default' creado para slice {slice_id} en zona {zona} (id={sg_id})")
+        return {'id': sg_id, 'name': 'default', 'slice_id': slice_id, 'zona': zona}
         
     except Error as e:
         logger.error(f"Error creando Security Group default: {str(e)}")
@@ -1279,7 +1293,7 @@ def create_custom_security_group(slice_id: int, name: str, description: str = ""
             slice_id,
             name,
             description or f'Security group personalizado {name} del slice {slice_id}',
-            json.dumps(initial_rules)
+            json.dumps(initial_rules, ensure_ascii=False)
         ))
         
         connection.commit()

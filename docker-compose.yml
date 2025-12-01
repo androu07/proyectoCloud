@@ -4,7 +4,6 @@ services:
     image: traefik:v3.0
     container_name: api_gateway
     command:
-      - "--api.insecure=true"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
       - "--entrypoints.web.address=:80"
@@ -22,7 +21,6 @@ services:
     ports:
       - "80:80"
       - "443:443"
-      - "8080:8080"  # Dashboard de Traefik
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - traefik_letsencrypt:/letsencrypt
@@ -97,32 +95,6 @@ services:
       - "traefik.http.routers.prometheus.entrypoints=websecure"
       - "traefik.http.routers.prometheus.tls.certresolver=myresolver"
       - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
-  
-  # API de Dashboard de métricas y logs
-  dashboards_api:
-    image: grafana/grafana:latest
-    container_name: dashboards_api
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./dashboards/provisioning/datasources:/etc/grafana/provisioning/datasources
-      - ./dashboards/provisioning/dashboards:/etc/grafana/provisioning/dashboards
-    environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin123
-      - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SERVER_ROOT_URL=https://localhost/grafana/
-      - GF_SERVER_SERVE_FROM_SUB_PATH=true
-    networks:
-      - red_cloud
-    restart: unless-stopped
-    depends_on:
-      - monitoring_api
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.grafana.rule=PathPrefix(`/grafana`)"
-      - "traefik.http.routers.grafana.entrypoints=websecure"
-      - "traefik.http.routers.grafana.tls.certresolver=myresolver"
-      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
 
   # API Gestor de Imágenes
   image_manager_api:
@@ -338,39 +310,6 @@ services:
     networks:
       - red_cloud
     restart: unless-stopped
-  
-  # Loki - Almacenamiento de logs
-  loki:
-    image: grafana/loki:2.9.0
-    container_name: loki
-    volumes:
-      - loki_data:/loki
-      - ./logs/loki/loki-config.yml:/etc/loki/local-config.yaml
-    command: -config.file=/etc/loki/local-config.yaml
-    networks:
-      - red_cloud
-    restart: unless-stopped
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.loki.rule=PathPrefix(`/loki`)"
-      - "traefik.http.routers.loki.entrypoints=websecure"
-      - "traefik.http.routers.loki.tls.certresolver=myresolver"
-      - "traefik.http.services.loki.loadbalancer.server.port=3100"
-
-  # Promtail - Recolector de logs
-  promtail:
-    image: grafana/promtail:2.9.0
-    container_name: promtail
-    volumes:
-      - ./logs/promtail:/etc/promtail
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - /var/run/docker.sock:/var/run/docker.sock
-    command: -config.file=/etc/promtail/promtail-config.yml
-    networks:
-      - red_cloud
-    restart: unless-stopped
-    depends_on:
-      - loki
 
   # ========== CONTENEDORES BASE DE DATOS ==========
   # Base de datos de usuarios
@@ -393,12 +332,13 @@ services:
   imagenes_db:
     image: mysql:8.0
     container_name: imagenes_db
-    command: --max_allowed_packet=1073741824
+    command: --max_allowed_packet=1073741824 --default-time-zone=-05:00
     environment:
       MYSQL_ROOT_PASSWORD: imagenes_root_pass
       MYSQL_DATABASE: imagenes_db
       MYSQL_USER: images_user
       MYSQL_PASSWORD: images_pass123
+      TZ: America/Lima
     volumes:
       - images_db_data:/var/lib/mysql
       - ./databases/init_imagenes.sql:/docker-entrypoint-initdb.d/init.sql
@@ -438,6 +378,28 @@ services:
       - red_cloud
     restart: unless-stopped
 
+  # ========== INTERFAZ GRAFICA ==========
+  web_ui:
+    build:
+      context: ./web_ui
+      dockerfile: Dockerfile
+    container_name: web_ui
+    ports:
+      - "8080:8080"
+    environment:
+      - AUTH_API=http://auth_api:8000
+      - SLICE_MANAGER_API=http://slice_manager_api:5900
+      - DRIVERS_API=http://drivers:6200
+      - IMAGE_MANAGER_API=http://image_manager_api:5007
+    networks:
+      - red_cloud
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.webui.rule=Host(`webui.local`) || PathPrefix(`/ui`)"
+      - "traefik.http.services.webui.loadbalancer.server.port=8080"
+      - "traefik.http.routers.webui.entrypoints=web"
+
 networks:
   red_cloud:
     driver: bridge
@@ -447,10 +409,8 @@ volumes:
   slices_data:
   security_groups_data:
   metrics_data:
-  grafana_data:
   images_data:
   images_db_data:
   traefik_letsencrypt:
   traefik_logs:
-  loki_data:
   placement_tracking:

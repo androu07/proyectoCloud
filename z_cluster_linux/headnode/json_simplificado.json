@@ -1,0 +1,32 @@
+{
+  "json_config": {
+    "id_slice": "99",
+    "topologias": [
+      {
+        "vms": [
+          {
+            "nombre": "vm1",
+            "flavor": "1;1536M;4G",
+            "image": "image_2",
+            "conexiones_vlans": "1",
+            "server": "worker1"
+          },
+          {
+            "nombre": "vm2",
+            "flavor": "1;1536M;4G",
+            "image": "image_2",
+            "conexiones_vlans": "1",
+            "server": "worker1"
+          },
+          {
+            "nombre": "vm3",
+            "flavor": "1;1536M;4G",
+            "image": "image_2",
+            "conexiones_vlans": "1",
+            "server": "worker2"
+          }
+        ]
+      }
+    ]
+  }
+}

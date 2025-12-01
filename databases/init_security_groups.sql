@@ -5,16 +5,18 @@ CREATE TABLE IF NOT EXISTS security_groups (
     name VARCHAR(100) NOT NULL,
     description TEXT,
     rules JSON,
+    zona VARCHAR(20) NULL DEFAULT NULL COMMENT 'Zona de despliegue: linux u openstack (NULL para templates)',
     is_default BOOLEAN NOT NULL DEFAULT FALSE COMMENT 'TRUE solo para el SG default creado en el despliegue del slice',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY unique_sg_per_slice (slice_id, name),
     INDEX idx_slice (slice_id),
+    INDEX idx_zona (zona),
     INDEX idx_default (slice_id, is_default)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Insertar Security Group por defecto como ejemplo
-INSERT INTO security_groups (slice_id, name, description, rules, is_default) VALUES 
+INSERT INTO security_groups (slice_id, name, description, rules, zona, is_default) VALUES 
 (
     0,  -- slice_id 0 = template para copiar cuando se creen nuevos slices
     'default',
@@ -61,9 +63,11 @@ INSERT INTO security_groups (slice_id, name, description, rules, is_default) VAL
             "description": "Permitir desde mismo grupo IPv6"
         }
     ]',
+    NULL,  -- zona NULL porque es template para todas las zonas
     TRUE  -- Este es el template default
 )
 ON DUPLICATE KEY UPDATE 
     description = VALUES(description),
     rules = VALUES(rules),
+    zona = VALUES(zona),
     is_default = VALUES(is_default);

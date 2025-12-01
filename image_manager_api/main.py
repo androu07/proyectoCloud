@@ -23,7 +23,8 @@ DOWNLOAD_TOKEN = os.getenv('DOWNLOAD_TOKEN', 'clavesihna')
 IMAGES_DIR = os.getenv('IMAGES_DIR', '/var/lib/images')
 MAX_IMAGE_SIZE = 1 * 1024 * 1024 * 1024  # 1GB en bytes
 
-# URLs de clusters
+# URLs de clusters - usar drivers API en lugar de IPs externas
+DRIVERS_API_URL = os.getenv('DRIVERS_API_URL', 'http://drivers:6200')
 LINUX_CLUSTER_URL = "http://192.168.203.1:5805/image-importer"
 OPENSTACK_CLUSTER_URL = "http://192.168.204.1:5805/image-importer"
 
@@ -137,22 +138,28 @@ async def download_image(url: str, dest_path: str) -> tuple[bool, str]:
     except Exception as e:
         return False, f"Error en descarga: {str(e)}"
 
-async def upload_to_linux_cluster(file_path: str) -> tuple[bool, str]:
-    """Subir imagen al cluster Linux"""
+async def upload_to_linux_cluster(image_id: int, source_url: str) -> tuple[bool, str]:
+    """Subir imagen al cluster Linux enviando URL para descarga"""
     try:
         async with httpx.AsyncClient(timeout=300.0) as client:
-            with open(file_path, 'rb') as f:
-                files = {'file': f}
-                response = await client.post(LINUX_CLUSTER_URL, files=files)
-                
-                if response.status_code == 200:
-                    return True, "Imagen subida al cluster Linux"
-                else:
-                    return False, f"Error al subir a Linux: {response.text}"
+            payload = {
+                'image_id': image_id,
+                'download_url': source_url
+            }
+            response = await client.post(
+                LINUX_CLUSTER_URL,
+                json=payload,
+                headers={'Content-Type': 'application/json'}
+            )
+            
+            if response.status_code == 200:
+                return True, "Imagen subida al cluster Linux"
+            else:
+                return False, f"Error al subir a Linux: {response.text}"
     except Exception as e:
         return False, f"Error conexión cluster Linux: {str(e)}"
 
-async def upload_to_openstack_cluster(file_path: str, nombre: str) -> tuple[bool, str, str]:
+async def upload_to_openstack_cluster(file_path: str, nombre: str, source_url: str = None) -> tuple[bool, str, str]:
     """Subir imagen al cluster OpenStack y obtener ID"""
     try:
         # Determinar disk_format para OpenStack
@@ -161,26 +168,40 @@ async def upload_to_openstack_cluster(file_path: str, nombre: str) -> tuple[bool
             '.img': 'qcow2',
             '.raw': 'raw',
             '.vmdk': 'vmdk',
-            '.vdi': 'vdi'
+            '.vdi': 'vdi',
+            '.iso': 'iso'
         }
         extension = get_file_extension(file_path)
         disk_format = disk_format_map.get(extension.lower(), 'qcow2')
         
+        # Preparar payload JSON para OpenStack
+        payload = {
+            'name': nombre,
+            'disk_format': disk_format,
+            'url': source_url if source_url else f'file://{file_path}'
+        }
+        
         async with httpx.AsyncClient(timeout=300.0) as client:
-            with open(file_path, 'rb') as f:
-                files = {'file': ('image' + extension, f, 'application/octet-stream')}
-                data = {
-                    'name': nombre,
-                    'disk_format': disk_format
-                }
-                response = await client.post(OPENSTACK_CLUSTER_URL, files=files, data=data)
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    openstack_id = result.get('id', result.get('image_id', ''))
-                    return True, "Imagen subida a OpenStack", openstack_id
-                else:
-                    return False, f"Error al subir a OpenStack: {response.text}", ""
+            response = await client.post(
+                OPENSTACK_CLUSTER_URL,
+                json=payload,
+                headers={'Content-Type': 'application/json'}
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                openstack_id = result.get('id', result.get('image_id', ''))
+                return True, "Imagen subida a OpenStack", openstack_id
+            else:
+                error_detail = response.text
+                try:
+                    error_json = response.json()
+                    error_detail = error_json.get('detail', error_detail)
+                except:
+                    pass
+                return False, f"Error al subir a OpenStack: {error_detail}", ""
+    except httpx.TimeoutException:
+        return False, "Timeout al conectar con OpenStack", ""
     except Exception as e:
         return False, f"Error conexión cluster OpenStack: {str(e)}", ""
 
@@ -317,13 +338,13 @@ async def import_image_from_url(
         
         # Subir a cluster Linux
         logger.info("Subiendo imagen a cluster Linux")
-        success, msg = await upload_to_linux_cluster(final_file)
+        success, msg = await upload_to_linux_cluster(image_id, url)
         if not success:
             logger.warning(f"Error al subir a Linux: {msg}")
         
         # Subir a cluster OpenStack
         logger.info("Subiendo imagen a cluster OpenStack")
-        success, msg, openstack_id = await upload_to_openstack_cluster(final_file, nombre)
+        success, msg, openstack_id = await upload_to_openstack_cluster(final_file, nombre, source_url=url)
         if success and openstack_id:
             update_openstack_id(image_id, openstack_id)
             logger.info(f"OpenStack ID: {openstack_id}")
@@ -428,21 +449,10 @@ async def upload_image_file(
         cursor.close()
         connection.close()
         
-        # Subir a cluster Linux
-        logger.info("Subiendo imagen a cluster Linux")
-        success, msg = await upload_to_linux_cluster(final_file)
-        if not success:
-            logger.warning(f"Error al subir a Linux: {msg}")
-        
-        # Subir a cluster OpenStack
-        logger.info("Subiendo imagen a cluster OpenStack")
-        success, msg, openstack_id = await upload_to_openstack_cluster(final_file, nombre)
-        if success and openstack_id:
-            update_openstack_id(image_id, openstack_id)
-            logger.info(f"OpenStack ID: {openstack_id}")
-        else:
-            logger.warning(f"Error al subir a OpenStack: {msg}")
-            openstack_id = None
+        # Linux y OpenStack requieren URL pública, no se puede subir desde archivo local
+        logger.info("Archivo subido localmente - Clusters requieren URL pública")
+        logger.warning("No se puede subir a clusters: archivo local sin URL de origen")
+        openstack_id = None
         
         return ImageResponse(
             success=True,
@@ -470,12 +480,12 @@ async def upload_image_file(
 
 @app.get("/list-images")
 async def list_images(authorized: bool = Depends(get_service_auth)):
-    """Listar todas las imágenes"""
+    """Listar todas las imágenes ordenadas por tamaño"""
     try:
         connection = mysql.connector.connect(**DB_CONFIG)
         cursor = connection.cursor(dictionary=True)
         
-        query = "SELECT * FROM imagenes ORDER BY fecha_importacion DESC"
+        query = "SELECT * FROM imagenes ORDER BY tamano_gb ASC, fecha_importacion DESC"
         cursor.execute(query)
         images = cursor.fetchall()
         
@@ -538,15 +548,9 @@ async def delete_image(image_id: int, authorized: bool = Depends(get_service_aut
             logger.info(f"Eliminando imagen del cluster OpenStack (ID: {image['id_openstack']})")
             try:
                 async with httpx.AsyncClient(timeout=60.0) as client:
-                    openstack_url = "http://cluster-openstack:5805/image-delete"
+                    openstack_url = f"http://192.168.204.1:5805/image-delete/{image['id_openstack']}"
                     logger.info(f"URL OpenStack: {openstack_url}")
-                    # Usar request() genérico para DELETE con multipart/form-data (equivalente a curl -F)
-                    logger.info(f"Enviando image_id: {image['id_openstack']}")
-                    response = await client.request(
-                        method='DELETE',
-                        url=openstack_url,
-                        files={'image_id': (None, image['id_openstack'])}
-                    )
+                    response = await client.delete(openstack_url)
                     logger.info(f"OpenStack response status: {response.status_code}")
                     logger.info(f"OpenStack response body: {response.text}")
                     if response.status_code == 200:
@@ -563,16 +567,20 @@ async def delete_image(image_id: int, authorized: bool = Depends(get_service_aut
             os.remove(image_path)
             logger.info(f"Archivo local eliminado: {image['nombre_imagen']}")
         
-        # COMENTADO: Eliminar de BD
-        # cursor.execute("DELETE FROM imagenes WHERE id = %s", (image_id,))
-        # connection.commit()
-        logger.info(f"BD NO ELIMINADA (comentado para pruebas)")
+        # Eliminar de BD
+        connection = mysql.connector.connect(**DB_CONFIG)
+        cursor = connection.cursor()
+        cursor.execute("DELETE FROM imagenes WHERE id = %s", (image_id,))
+        connection.commit()
+        cursor.close()
+        connection.close()
+        logger.info(f"Imagen eliminada de la base de datos")
         
         logger.info(f"Resultado - Linux: {linux_success}, OpenStack: {openstack_success}")
         
         return {
             "success": True,
-            "message": f"Prueba de eliminación - Linux: {linux_success}, OpenStack: {openstack_success}",
+            "message": "Imagen eliminada exitosamente",
             "linux_deleted": linux_success,
             "openstack_deleted": openstack_success
         }

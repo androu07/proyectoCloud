@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+
+{% block title %}Crear Red — G1{% endblock %}
+
+{% block content %}
+<style>
+  .network-create-form {
+    max-width: 420px;
+    margin: 32px auto;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.07);
+    padding: 32px 28px 24px 28px;
+  }
+  .network-create-form h2 {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 18px;
+    color: #1e293b;
+    text-align: center;
+  }
+  .network-create-form label {
+    font-weight: 600;
+    color: #475569;
+    margin-bottom: 4px;
+    font-size: 14px;
+    display: block;
+  }
+  .network-create-form input {
+    width: 100%;
+    padding: 7px 10px;
+    margin-bottom: 16px;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    font-size: 15px;
+    color: #1e293b;
+    background: #f9fafb;
+  }
+  .network-create-form button {
+    background: #2563eb;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 10px 24px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    width: 100%;
+    margin-top: 8px;
+    transition: background 0.2s;
+  }
+  .network-create-form button:hover {
+    background: #1d4ed8;
+  }
+</style>
+<div class="network-create-form">
+  <h2>Crear Red</h2>
+  <form method="POST">
+    <label for="network_name">Nombre de la red</label>
+    <input type="text" id="network_name" name="network_name" required>
+    <label for="cidr">CIDR</label>
+    <input type="text" id="cidr" name="cidr" placeholder="Ej: 10.0.0.0/16" required>
+    <label for="description">Descripción</label>
+    <input type="text" id="description" name="description">
+    <button type="submit">Crear Red</button>
+  </form>
+</div>
+{% if message %}
+  <div style="text-align:center;color:#2563eb;font-weight:600;margin-top:18px;">{{ message }}</div>
+{% endif %}
+{% endblock %}

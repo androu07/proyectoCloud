@@ -1,0 +1,21 @@
+[Unit]
+Description=VM Node Manager API
+# Documentation URL here
+Wants=network-online.target libvirtd.service
+After=network-online.target libvirtd.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=libvirt
+SupplementaryGroups=libvirt
+WorkingDirectory=/home/ubuntu/scripts_app/mngmt
+Environment="PATH=/usr/bin:/usr/local/bin"
+ExecStart=/usr/bin/python3 /home/ubuntu/scripts_app/mngmt/vm_node_manager.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

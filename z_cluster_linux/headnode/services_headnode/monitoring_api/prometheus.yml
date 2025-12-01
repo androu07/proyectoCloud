@@ -1,0 +1,66 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'linux'
+    headnode: '192.168.203.1'
+
+# Enviar métricas al Prometheus Central
+remote_write:
+  - url: 'http://10.20.12.169:9090/prometheus/api/v1/write'
+    queue_config:
+      capacity: 10000
+      max_shards: 5
+      min_shards: 1
+      max_samples_per_send: 5000
+      batch_send_deadline: 5s
+      min_backoff: 30ms
+      max_backoff: 100ms
+
+rule_files:
+  # - rules.yml
+
+scrape_configs:
+  # Prometheus - Métricas del propio Prometheus
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Métricas de los worker nodes
+  - job_name: 'workers-linux'
+    static_configs:
+      - targets: ['192.168.201.2:9100']
+        labels:
+          nombre: 'Worker-1'
+          zona: 'linux'
+          
+      - targets: ['192.168.201.3:9100']
+        labels:
+          nombre: 'Worker-2'
+          zona: 'linux'
+          
+      - targets: ['192.168.201.4:9100']
+        labels:
+          nombre: 'Worker-3'
+          zona: 'linux'
+    scrape_interval: 15s
+
+  # Blackbox Exporter - Para verificar el estado de workers en Cluster Linux
+  - job_name: 'blackbox-workers-linux'
+    metrics_path: /probe
+    params:
+      module: [icmp]
+    static_configs:
+      - targets:
+          - 192.168.201.2
+          - 192.168.201.3
+          - 192.168.201.4
+        labels:
+          zona: 'linux'
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: 192.168.203.1:9115

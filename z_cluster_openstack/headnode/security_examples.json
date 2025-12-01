@@ -1,0 +1,127 @@
+{
+  "ejemplos": {
+    "crear_sg_personalizado": {
+      "url": "POST http://localhost:5811/create-custom",
+      "body": {
+        "slice_id": 5,
+        "id_sg": 1
+      },
+      "descripcion": "Crea SG_id5_1"
+    },
+    
+    "eliminar_sg_default": {
+      "url": "POST http://localhost:5811/remove-default",
+      "body": {
+        "slice_id": 5
+      },
+      "descripcion": "Elimina SG_df_id5"
+    },
+    
+    "eliminar_sg_personalizado": {
+      "url": "POST http://localhost:5811/remove-custom",
+      "body": {
+        "slice_id": 5,
+        "id_sg": 1
+      },
+      "descripcion": "Elimina SG_id5_1"
+    },
+    
+    "agregar_regla_ssh": {
+      "url": "POST http://localhost:5811/add-rule",
+      "body": {
+        "slice_id": 5,
+        "id_sg": 1,
+        "rule_template": "SSH",
+        "direction": "ingress",
+        "remote_ip_prefix": "0.0.0.0/0",
+        "description": "Allow SSH from anywhere"
+      },
+      "descripcion": "Agrega regla SSH a SG_id5_1"
+    },
+    
+    "agregar_regla_http": {
+      "url": "POST http://localhost:5811/add-rule",
+      "body": {
+        "slice_id": 5,
+        "rule_template": "HTTP",
+        "direction": "ingress",
+        "remote_ip_prefix": "0.0.0.0/0"
+      },
+      "descripcion": "Agrega HTTP al SG default (sin id_sg)"
+    },
+    
+    "agregar_regla_custom_tcp": {
+      "url": "POST http://localhost:5811/add-rule",
+      "body": {
+        "slice_id": 5,
+        "id_sg": 1,
+        "rule_template": "CUSTOM_TCP",
+        "port_range": "8080-8090",
+        "direction": "ingress",
+        "remote_ip_prefix": "192.168.1.0/24",
+        "description": "Custom TCP range"
+      },
+      "descripcion": "Agrega TCP personalizado puertos 8080-8090"
+    },
+    
+    "agregar_all_tcp": {
+      "url": "POST http://localhost:5811/add-rule",
+      "body": {
+        "slice_id": 5,
+        "id_sg": 1,
+        "rule_template": "ALL_TCP",
+        "direction": "ingress",
+        "remote_ip_prefix": "0.0.0.0/0"
+      },
+      "descripcion": "Permite todo el tráfico TCP (1-65535)"
+    },
+    
+    "eliminar_regla": {
+      "url": "POST http://localhost:5811/remove-rule",
+      "body": {
+        "slice_id": 5,
+        "id_sg": 1,
+        "rule_id": "uuid-de-la-regla-aqui"
+      },
+      "descripcion": "Elimina regla específica (obtener UUID con /status)"
+    },
+    
+    "ver_estado": {
+      "url": "POST http://localhost:5811/status",
+      "body": {
+        "slice_id": 5
+      },
+      "descripcion": "Lista todos los SGs del slice"
+    },
+    
+    "ver_detalles_sg": {
+      "url": "GET http://localhost:5811/sg-details/5/SG_id5_1",
+      "descripcion": "Ver todas las reglas de SG_id5_1"
+    },
+    
+    "ver_plantillas": {
+      "url": "GET http://localhost:5811/templates",
+      "descripcion": "Lista plantillas de reglas disponibles"
+    }
+  },
+  
+  "plantillas_disponibles": [
+    "SSH",
+    "HTTP", 
+    "HTTPS",
+    "DNS",
+    "ALL_TCP",
+    "ALL_UDP",
+    "ALL_ICMP",
+    "CUSTOM_TCP",
+    "CUSTOM_UDP",
+    "CUSTOM_ICMP"
+  ],
+  
+  "nomenclatura": {
+    "sg_default": "SG_df_id{slice_id}",
+    "sg_personalizado": "SG_id{slice_id}_{id_sg}",
+    "ejemplo_default": "SG_df_id5",
+    "ejemplo_custom": "SG_id5_1"
+  }
+}

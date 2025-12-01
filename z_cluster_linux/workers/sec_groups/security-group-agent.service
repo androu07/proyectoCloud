@@ -1,0 +1,29 @@
+[Unit]
+Description=Security Group Agent - Firewall Rule Management Service
+After=network.target network-online.target
+Wants=network-online.target
+Documentation=https://github.com/your-org/security-group-agent
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/home/ubuntu/scripts_app/sec_groups
+ExecStart=/usr/bin/python3 /home/ubuntu/scripts_app/sec_groups/security_group_agent.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/security_group_agent.log
+StandardError=append:/var/log/security_group_agent.log
+
+# Security settings
+NoNewPrivileges=false
+PrivateTmp=false
+
+# Resource limits
+LimitNOFILE=65536
+
+# Environment
+Environment="PYTHONUNBUFFERED=1"
+
+[Install]
+WantedBy=multi-user.target

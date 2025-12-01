@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, status, Request
+from fastapi import FastAPI, HTTPException, Depends, status, Request, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -517,7 +517,7 @@ async def proxy_to_image_manager(
             if method == "GET":
                 response = await client.get(url, headers=headers, params=params)
             elif method == "POST":
-                if files:
+                if files is not None:  # Si files está presente (aunque sea vacío), enviar como form data
                     response = await client.post(url, headers=headers, files=files, data=data)
                 else:
                     headers["Content-Type"] = "application/json"
@@ -623,7 +623,9 @@ async def health_check():
 
 @app.post("/img-mngr/import-image")
 async def import_image_from_url(
-    request: Request,
+    nombre: str = Form(...),
+    descripcion: str = Form(...),
+    url: str = Form(...),
     admin_user: dict = Depends(require_admin)
 ):
     """
@@ -631,11 +633,18 @@ async def import_image_from_url(
     Proxy a: POST /import-image del image_manager_api
     """
     try:
-        body = await request.json()
+        # Preparar datos para enviar como form data
+        form_data = {
+            'nombre': nombre,
+            'descripcion': descripcion,
+            'url': url
+        }
+        
         status_code, response_data = await proxy_to_image_manager(
             method="POST",
             path="/import-image",
-            data=body
+            data=form_data,
+            files={}  # Enviar dict vacío para forzar form data en lugar de JSON
         )
         
         if status_code >= 400:

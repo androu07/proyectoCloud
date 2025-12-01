@@ -1,0 +1,1018 @@
+﻿{% extends "base.html" %}
+
+{% block title %}Crear Slice{% endblock %}
+
+{% block content %}
+<link href="https://unpkg.com/vis-network/styles/vis-network.min.css" rel="stylesheet" />
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+
+<!-- Page Header -->
+<div class="page-header">
+    <h1 class="page-title">Crear Slice</h1>
+    <div class="action-group">
+        <a href="{{ url_for('index') }}" class="btn btn-secondary">Cancelar</a>
+        <button class="btn btn-success" id="createSliceBtn" disabled>Crear Slice</button>
+    </div>
+</div>
+
+<div class="slice-controls-wrapper">
+    <div class="slice-name-section">
+        <input type="text" id="sliceName" class="slice-name-input" placeholder="Nombre del Slice">
+    </div>
+
+    <div class="add-topology-section">
+        <button class="btn btn-create" id="importJsonBtn">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+                <path d="M8 12h8M8 16h8M8 8h8" stroke="currentColor" stroke-width="2" fill="none"></path>
+            </svg>
+            Importar JSON
+        </button>
+        <div style="display: inline-flex; align-items: center; gap: 8px; margin-left: 12px;">
+            <label for="availabilityZone" style="font-weight: 500; font-size: 14px; color: #374151;">Zona:</label>
+            <select id="availabilityZone" style="padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 14px; color: #374151; background: white;">
+                <option value="az-east">AZ - East</option>
+                <option value="az-west">AZ - West</option>
+            </select>
+        </div>
+        <!-- Modal Importar JSON -->
+        <div id="importJsonModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Importar JSON</h3>
+                    <button class="modal-close" id="closeImportJsonModal">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group" style="text-align:center;">
+                        <label for="jsonFileInput">Selecciona un archivo JSON para importar</label>
+                        <input type="file" id="jsonFileInput" accept="application/json" style="margin: 16px auto; display:block;" />
+                        <div id="jsonFileName" style="margin-top:8px; color:#667eea;"></div>
+                        <div id="jsonFileError" style="color:#ef4444; margin-top:8px;"></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-primary" id="importJsonConfirmBtn">Importar</button>
+                </div>
+            </div>
+        </div>
+        <button class="btn btn-create" id="addTopologyBtn">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="8" x2="12" y2="16"></line>
+                <line x1="8" y1="12" x2="16" y2="12"></line>
+            </svg>
+            Añadir Topología
+        </button>
+        <span class="topology-counter" id="topologyCounter">0/3 topologías</span>
+        <span class="topology-counter" id="vmCounter" style="margin-left: 12px;">0/12 VMs</span>
+    </div>
+</div>
+
+<div class="topology-container">
+    <div id="topologyCanvas" class="empty-state">
+        <button id="exitEditBtn" class="exit-edit-btn" style="display: none;">
+            <span>Salir</span>
+            <span class="exit-x">&times;</span>
+        </button>
+        <button id="addVmBtn" class="add-vm-btn" style="display: none;" title="Añadir VM">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="12" y1="8" x2="12" y2="16"></line>
+                <line x1="8" y1="12" x2="16" y2="12"></line>
+            </svg>
+        </button>
+        <button id="createLinkBtn" class="create-link-btn" style="display: none;" title="Crear Enlace">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+            </svg>
+        </button>
+        <div class="canvas-empty-state">
+            <div class="empty-icon">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <!-- Nodos -->
+                    <circle cx="12" cy="5" r="2" fill="#667eea" stroke="#667eea"></circle>
+                    <circle cx="5" cy="12" r="2" fill="#48bb78" stroke="#48bb78"></circle>
+                    <circle cx="19" cy="12" r="2" fill="#ed8936" stroke="#ed8936"></circle>
+                    <circle cx="12" cy="19" r="2" fill="#f56565" stroke="#f56565"></circle>
+                    <!-- Enlaces -->
+                    <line x1="12" y1="7" x2="12" y2="17" stroke="#a0aec0" stroke-width="2"></line>
+                    <line x1="7" y1="12" x2="17" y2="12" stroke="#a0aec0" stroke-width="2"></line>
+                </svg>
+            </div>
+            <h2>No hay topologías</h2>
+            <p>Añade una topología para comenzar a diseñar tu slice</p>
+        </div>
+        <div id="network"></div>
+    </div>
+</div>
+
+<!-- Modal para añadir topología -->
+<div id="topologyModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Añadir Topología</h3>
+            <button class="modal-close" id="closeTopologyModal">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>Tipo de Topología</label>
+                <select id="topologyType">
+                    <option value="">Seleccionar...</option>
+                    <option value="lineal">Lineal</option>
+                    <option value="arbol">Árbol</option>
+                    <option value="anillo">Anillo</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Número de VMs</label>
+                <select id="vmCount">
+                    <option value="">Seleccione tipo primero</option>
+                </select>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-primary" id="acceptTopologyBtn">Aceptar</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal para configurar VM -->
+<div id="vmModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Configurar VM</h3>
+            <button class="modal-close" id="closeVmModal">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>Nombre</label>
+                <input type="text" id="vmName">
+            </div>
+            <div class="form-group">
+                <label>Sistema Operativo</label>
+                <select id="vmOS">
+                    <option value="cirros">Cirros</option>
+                    <option value="ubuntu">Ubuntu</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Flavor</label>
+                <select id="vmFlavor">
+                    <option value="f7">1 CPU - 0.5 GB RAM - 1G SSD</option>
+                    <option value="f4">1 CPU - 0.5 GB RAM - 2G SSD</option>
+                    <option value="f11">1 CPU - 1 GB RAM - 1G SSD</option>
+                    <option value="f5">1 CPU - 1 GB RAM - 2G SSD</option>
+                    <option value="f2">1 CPU - 1.5 GB RAM - 1G SSD</option>
+                    <option value="f9">1 CPU - 1.5 GB RAM - 2G SSD</option>
+                    <option value="f13">1 CPU - 1.5 GB RAM - 3G SSD</option>
+                    <option value="f14">1 CPU - 1.5 GB RAM - 4G SSD</option>
+                    <option value="f6">2 CPUs - 0.5 GB RAM - 1G SSD</option>
+                    <option value="f3">2 CPUs - 0.5 GB RAM - 2G SSD</option>
+                    <option value="f10">2 CPUs - 1 GB RAM - 1G SSD</option>
+                    <option value="f8">2 CPUs - 1 GB RAM - 2G SSD</option>
+                    <option value="f1">2 CPUs - 1.5 GB RAM - 1G SSD</option>
+                    <option value="f12">2 CPUs - 1.5 GB RAM - 2G SSD</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="vmInternet">
+                    <span>Conexión a Internet</span>
+                </label>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-primary" id="saveVmBtn">Guardar</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    var createUrl = "{{ url_for('create_slice') }}";
+    var indexUrl = "{{ url_for('index') }}";
+</script>
+<script src="{{ url_for('static', filename='slice-creator.js') }}"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        var importBtn = document.getElementById('importJsonBtn');
+        var modal = document.getElementById('importJsonModal');
+        var closeBtn = document.getElementById('closeImportJsonModal');
+        var fileInput = document.getElementById('jsonFileInput');
+        var fileName = document.getElementById('jsonFileName');
+        var fileError = document.getElementById('jsonFileError');
+        var confirmBtn = document.getElementById('importJsonConfirmBtn');
+        var addTopologyBtn = document.getElementById('addTopologyBtn');
+        var createSliceBtn = document.getElementById('createSliceBtn');
+        var sliceNameInput = document.getElementById('sliceName');
+        var importedJson = null;
+
+        if(importBtn && modal && closeBtn) {
+            importBtn.onclick = function() {
+                modal.style.display = 'flex';
+                fileInput.value = '';
+                fileName.textContent = '';
+                fileError.textContent = '';
+            };
+            closeBtn.onclick = function() {
+                modal.style.display = 'none';
+            };
+            window.onclick = function(event) {
+                if (event.target == modal) {
+                    modal.style.display = 'none';
+                }
+            };
+            fileInput.onchange = function() {
+                if(fileInput.files.length > 0) {
+                    var file = fileInput.files[0];
+                    if(file.type !== 'application/json') {
+                        fileError.textContent = 'El archivo debe ser formato JSON.';
+                        fileName.textContent = '';
+                        fileInput.value = '';
+                        createSliceBtn.disabled = true;
+                        createSliceBtn.classList.add('disabled');
+                    } else {
+                        fileName.textContent = 'Archivo seleccionado: ' + file.name;
+                        fileError.textContent = '';
+                        // Leer el archivo y validar JSON para habilitar Crear Slice
+                        var reader = new FileReader();
+                        reader.onload = function(e) {
+                            try {
+                                importedJson = JSON.parse(e.target.result);
+                                addTopologyBtn.disabled = true;
+                                addTopologyBtn.classList.add('disabled');
+                                createSliceBtn.disabled = false;
+                                createSliceBtn.classList.remove('disabled');
+                                if(importedJson.nombre_slice) {
+                                    sliceNameInput.value = importedJson.nombre_slice;
+                                } else if(importedJson.name) {
+                                    sliceNameInput.value = importedJson.name;
+                                }
+                            } catch(err) {
+                                fileError.textContent = 'El archivo no es un JSON válido.';
+                                createSliceBtn.disabled = true;
+                                createSliceBtn.classList.add('disabled');
+                            }
+                        };
+                        reader.readAsText(file);
+                    }
+                } else {
+                    fileName.textContent = '';
+                    fileError.textContent = '';
+                    createSliceBtn.disabled = true;
+                    createSliceBtn.classList.add('disabled');
+                }
+            };
+            confirmBtn.onclick = function() {
+                if(fileInput.files.length === 0) {
+                    fileError.textContent = 'Selecciona un archivo JSON.';
+                    return;
+                }
+                var reader = new FileReader();
+                reader.onload = function(e) {
+                    try {
+                        importedJson = JSON.parse(e.target.result);
+                        // Deshabilitar Añadir Topología, habilitar Crear Slice
+                        addTopologyBtn.disabled = true;
+                        addTopologyBtn.classList.add('disabled');
+                        createSliceBtn.disabled = false;
+                        createSliceBtn.classList.remove('disabled');
+                        // Opcional: poner el nombre del slice si existe en el JSON
+                        if(importedJson.nombre_slice) {
+                            sliceNameInput.value = importedJson.nombre_slice;
+                        } else if(importedJson.name) {
+                            sliceNameInput.value = importedJson.name;
+                        }
+                        modal.style.display = 'none';
+                    } catch(err) {
+                        fileError.textContent = 'El archivo no es un JSON válido.';
+                    }
+                };
+                reader.readAsText(fileInput.files[0]);
+            };
+            // Interceptar el submit del formulario para enviar el JSON
+            createSliceBtn.onclick = function(e) {
+                if(importedJson) {
+                    e.preventDefault();
+                    fetch("{{ url_for('create_slice') }}", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify(importedJson)
+                    })
+                    .then(response => response.ok ? window.location.href = "{{ url_for('index') }}" : response.text().then(alert))
+                    .catch(err => alert('Error al guardar el slice: ' + err));
+                }
+            };
+        }
+    });
+</script>
+<script>
+    // Abrir modal al hacer click en Importar JSON
+    document.addEventListener('DOMContentLoaded', function() {
+        var importBtn = document.getElementById('importJsonBtn');
+        var modal = document.getElementById('importJsonModal');
+        var closeBtn = document.getElementById('closeImportJsonModal');
+        var fileInput = document.getElementById('jsonFileInput');
+        var fileName = document.getElementById('jsonFileName');
+        var fileError = document.getElementById('jsonFileError');
+        var confirmBtn = document.getElementById('importJsonConfirmBtn');
+
+        if(importBtn && modal && closeBtn) {
+            importBtn.onclick = function() {
+                modal.style.display = 'flex';
+                fileInput.value = '';
+                fileName.textContent = '';
+                fileError.textContent = '';
+            };
+            closeBtn.onclick = function() {
+                modal.style.display = 'none';
+            };
+            window.onclick = function(event) {
+                if (event.target == modal) {
+                    modal.style.display = 'none';
+                }
+            };
+            fileInput.onchange = function() {
+                if(fileInput.files.length > 0) {
+                    var file = fileInput.files[0];
+                    if(file.type !== 'application/json') {
+                        fileError.textContent = 'El archivo debe ser formato JSON.';
+                        fileName.textContent = '';
+                        fileInput.value = '';
+                    } else {
+                        fileName.textContent = 'Archivo seleccionado: ' + file.name;
+                        fileError.textContent = '';
+                    }
+                } else {
+                    fileName.textContent = '';
+                    fileError.textContent = '';
+                }
+            };
+            confirmBtn.onclick = function() {
+                if(fileInput.files.length === 0) {
+                    fileError.textContent = 'Selecciona un archivo JSON.';
+                    return;
+                }
+                var reader = new FileReader();
+                reader.onload = function(e) {
+                    try {
+                        importedJson = JSON.parse(e.target.result);
+                        addTopologyBtn.disabled = true;
+                        addTopologyBtn.classList.add('disabled');
+                        createSliceBtn.disabled = false;
+                        createSliceBtn.classList.remove('disabled');
+                        if(importedJson.nombre_slice) {
+                            sliceNameInput.value = importedJson.nombre_slice;
+                        } else if(importedJson.name) {
+                            sliceNameInput.value = importedJson.name;
+                        }
+                        modal.style.display = 'none';
+                    } catch(err) {
+                        fileError.textContent = 'El archivo no es un JSON válido.';
+                    }
+                };
+                reader.readAsText(fileInput.files[0]);
+            };
+        }
+    });
+</script>
+
+<style>
+    /* Create Button: Purple */
+    .btn-create {
+        background: #667eea;
+        color: white;
+        border: 1px solid #667eea;
+    }
+
+    .btn-create:hover {
+        background: #5568d3;
+        border-color: #5568d3;
+        color: white;
+    }
+
+    .main-content {
+        padding-top: 8px;
+    }
+
+    .page-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 24px;
+    }
+
+    .page-title {
+        font-size: 28px;
+        font-weight: 500;
+        color: #333;
+        margin: 0;
+    }
+
+    .action-group {
+        display: flex;
+        gap: 8px;
+    }
+
+    .btn-secondary {
+        background: #ef4444;
+        border: 1px solid #ef4444;
+        color: white;
+        padding: 8px 16px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s;
+        text-decoration: none;
+        border-radius: 4px;
+        display: inline-flex;
+        align-items: center;
+    }
+
+    .btn-secondary:hover {
+        background: #dc2626;
+        border-color: #dc2626;
+        color: white;
+    }
+
+    .slice-controls-wrapper {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0px;
+    }
+
+    .slice-name-input {
+        width: 100%;
+        padding: 8px 12px;
+        border: 1px solid #d1d5db;
+        border-radius: 4px;
+        font-size: 14px;
+        color: #374151;
+    }
+
+    .slice-name-input:focus {
+        outline: none;
+        border-color: #667eea;
+    }
+
+
+    .slice-name-section {
+        flex: 1;
+        max-width: 400px;
+    }
+
+
+
+
+
+
+
+    .topology-container {
+        margin-bottom: 20px;
+        margin-top: 28px;
+        padding-right: 60px;
+    }
+
+    #topologyCanvas {
+        position: relative;
+        text-align: center;
+        padding: 20px;
+        background: linear-gradient(135deg, #e0e7ff 0%, #fef3c7 50%, #fce7f3 100%);
+        border-radius: 20px;
+        border: 3px dashed #a78bfa;
+        min-height: 300px;
+        box-shadow: 0 0 20px rgba(167, 139, 250, 0.3);
+        overflow: hidden;
+    }
+
+    #topologyCanvas .empty-icon {
+        margin: 0 auto 24px;
+        width: 96px;
+        height: 96px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+    }
+
+    #topologyCanvas .empty-icon svg {
+        color: white;
+    }
+
+    #topologyCanvas h2 {
+        margin: 0 0 12px 0;
+        font-size: 24px;
+        font-weight: 700;
+        color: #5b21b6;
+    }
+
+    #topologyCanvas p {
+        margin: 0 0 28px 0;
+        color: #7c3aed;
+        font-size: 16px;
+        font-weight: 500;
+    }
+
+    .canvas-empty-state {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+        z-index: 1;
+        width: 100%;
+    }
+
+    #network {
+        width: 100%;
+        height: 100%;
+        display: none;
+        position: absolute;
+        top: 0;
+        left: 0;
+        border-radius: 20px;
+    }
+
+    /* Zoom control styles (created dynamically by JS) */
+    .zoom-controls {
+        position: absolute;
+        top: 18px;
+        left: 18px;
+        z-index: 1000;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        pointer-events: none;
+    }
+
+    .zoom-btn {
+        width: 38px;
+        height: 38px;
+        border-radius: 8px;
+        border: none;
+        background: linear-gradient(135deg, #ffffff 0%, #eef2ff 100%);
+        box-shadow: none;
+        color: #3730a3;
+        font-weight: 700;
+        font-size: 18px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: auto;
+    }
+
+    .zoom-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: none;
+    }
+
+    .add-topology-section {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-right: 20px;
+    }
+
+    .add-topology-section .btn {
+        padding: 8px 14px;
+        font-size: 12px;
+    }
+
+    .add-topology-section .btn svg {
+        width: 16px;
+        height: 16px;
+    }
+
+    .topology-counter {
+        font-size: 14px;
+        color: #8b5cf6;
+        font-weight: 600;
+        background: linear-gradient(135deg, #ede9fe 0%, #fef3c7 100%);
+        padding: 6px 12px;
+        border-radius: 20px;
+        border: 2px solid #c4b5fd;
+    }
+
+    .exit-edit-btn {
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 16px;
+        background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+        border: 2px solid #d97706;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 700;
+        color: white;
+        box-shadow: none;
+        transition: all 0.2s ease;
+        z-index: 1500;
+    }
+
+    .exit-edit-btn:hover {
+        background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        box-shadow: none;
+        transform: translateY(-2px);
+    }
+
+    .exit-edit-btn .exit-x {
+        font-size: 24px;
+        line-height: 1;
+        color: white;
+    }
+
+    .add-vm-btn {
+        position: absolute;
+        top: 80px;
+        right: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 12px;
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        border: 2px solid #047857;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 700;
+        color: white;
+        box-shadow: none;
+        transition: all 0.2s ease;
+        z-index: 1500;
+        width: 48px;
+        height: 48px;
+    }
+
+    .add-vm-btn:hover {
+        background: linear-gradient(135deg, #059669 0%, #047857 100%);
+        box-shadow: none;
+        transform: translateY(-2px);
+    }
+
+    .add-vm-btn svg {
+        width: 24px;
+        height: 24px;
+    }
+
+    .create-link-btn {
+        position: absolute;
+        top: 140px;
+        right: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 12px;
+        background: linear-gradient(135deg, #667eea 0%, #5a67d8 100%);
+        border: 2px solid #4c51bf;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 700;
+        color: white;
+        box-shadow: none;
+        transition: all 0.2s ease;
+        z-index: 1500;
+        width: 48px;
+        height: 48px;
+    }
+
+    .create-link-btn:hover {
+        background: linear-gradient(135deg, #5a67d8 0%, #4c51bf 100%);
+        box-shadow: none;
+        transform: translateY(-2px);
+    }
+
+    .create-link-btn.active {
+        background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+        border-color: #2f855a;
+        box-shadow: none;
+    }
+
+    .create-link-btn.disabled {
+        background: linear-gradient(135deg, #cbd5e0 0%, #a0aec0 100%);
+        border-color: #718096;
+        cursor: not-allowed;
+        opacity: 0.6;
+    }
+
+    .create-link-btn svg {
+        width: 24px;
+        height: 24px;
+    }
+
+    .link-mode-indicator {
+        position: absolute;
+        top: 80px;
+        left: 20px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 20px;
+        background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+        border: 2px solid #2f855a;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 600;
+        color: white;
+        box-shadow: 0 4px 14px rgba(72, 187, 120, 0.5);
+        z-index: 1500;
+        animation: pulse 2s ease-in-out infinite;
+    }
+
+    .link-mode-indicator .indicator-icon {
+        font-size: 20px;
+        animation: bounce 1s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+
+        0%,
+        100% {
+            box-shadow: 0 4px 14px rgba(72, 187, 120, 0.5);
+        }
+
+        50% {
+            box-shadow: 0 6px 20px rgba(72, 187, 120, 0.8);
+        }
+    }
+
+    @keyframes bounce {
+
+        0%,
+        100% {
+            transform: translateY(0);
+        }
+
+        50% {
+            transform: translateY(-3px);
+        }
+    }
+
+    .modal {
+        display: none;
+        position: fixed;
+        z-index: 1000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.5);
+        animation: fadeIn 0.2s ease;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .modal[style*="display: block"] {
+        display: flex !important;
+    }
+
+    .modal-content {
+        background-color: white;
+        margin: 0;
+        padding: 0;
+        border-radius: 12px;
+        width: 90%;
+        max-width: 420px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        animation: slideDown 0.3s ease;
+    }
+
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+        }
+
+        to {
+            opacity: 1;
+        }
+    }
+
+    @keyframes slideDown {
+        from {
+            transform: translateY(-50px);
+            opacity: 0;
+        }
+
+        to {
+            transform: translateY(0);
+            opacity: 1;
+        }
+    }
+
+    .modal-header {
+        padding: 20px 24px;
+        border-bottom: 1px solid #e2e8f0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .modal-header h3 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 700;
+        color: #0f172a;
+    }
+
+    .modal-close {
+        background: none;
+        border: none;
+        font-size: 36px;
+        cursor: pointer;
+        color: #94a3b8;
+        padding: 0;
+        width: 40px;
+        height: 40px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 6px;
+        transition: all 0.2s ease;
+    }
+
+    .modal-close:hover {
+        background: #f1f5f9;
+        color: #475569;
+    }
+
+    .modal-body {
+        padding: 24px;
+    }
+
+    .form-group {
+        margin-bottom: 20px;
+    }
+
+    .form-group:last-child {
+        margin-bottom: 0;
+    }
+
+    .form-group label {
+        display: block;
+        font-size: 14px;
+        font-weight: 600;
+        color: #334155;
+        margin-bottom: 8px;
+    }
+
+    .form-group input[type="text"],
+    .form-group select {
+        width: 100%;
+        padding: 10px 14px;
+        font-size: 14px;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        outline: none;
+        transition: all 0.2s ease;
+        box-sizing: border-box;
+        height: 42px;
+        font-family: inherit;
+        color: #334155;
+        font-weight: 400;
+        line-height: 1.5;
+    }
+
+    .form-group input[type="text"]:focus,
+    .form-group select:focus {
+        border-color: #667eea;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+
+    .checkbox-label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+        font-weight: 500 !important;
+    }
+
+    .checkbox-label input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+        cursor: pointer;
+    }
+
+    .modal-footer {
+        padding: 16px 24px;
+        border-top: 1px solid #e2e8f0;
+        display: flex;
+        gap: 12px;
+        justify-content: flex-end;
+    }
+
+    .btn-secondary {
+        background: #e2e8f0;
+        color: #475569;
+        border: none;
+    }
+
+    .btn-secondary:hover {
+        background: #cbd5e1;
+    }
+
+    /* Notification Modal */
+    .notification-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+    }
+
+    .notification-modal.show {
+        opacity: 1;
+    }
+
+    .notification-content {
+        background: white;
+        border-radius: 16px;
+        padding: 32px;
+        max-width: 400px;
+        text-align: center;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        transform: scale(0.9);
+        transition: transform 0.3s ease;
+    }
+
+    .notification-modal.show .notification-content {
+        transform: scale(1);
+    }
+
+    .notification-icon {
+        width: 80px;
+        height: 80px;
+        margin: 0 auto 20px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .notification-content.success .notification-icon {
+        background: linear-gradient(135deg, #10b981 0%, #34d399 100%);
+        box-shadow: 0 8px 20px rgba(16, 185, 129, 0.3);
+    }
+
+    .notification-content.success .notification-icon svg {
+        color: white;
+    }
+
+    .notification-content.error .notification-icon {
+        background: linear-gradient(135deg, #ef4444 0%, #f87171 100%);
+        box-shadow: 0 8px 20px rgba(239, 68, 68, 0.3);
+    }
+
+    .notification-content.error .notification-icon svg {
+        color: white;
+    }
+
+    .notification-content h3 {
+        margin: 0 0 12px 0;
+        font-size: 24px;
+        font-weight: 700;
+        color: #1e293b;
+    }
+
+    .notification-content p {
+        margin: 0 0 24px 0;
+        font-size: 16px;
+        color: #64748b;
+    }
+
+    .notification-btn {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        padding: 12px 32px;
+        border-radius: 8px;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        box-shadow: none;
+    }
+
+    .notification-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: none;
+    }
+</style>
+
+{% endblock %}

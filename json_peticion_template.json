@@ -1,6 +1,6 @@
 {
   "nombre_slice": "Mi Topología Test",
-  "zona_despliegue": "linux",
+  "zona_despliegue": "openstack",
   "solicitud_json": {
     "id_slice": "",
     "total_vms": "4",
@@ -17,9 +17,9 @@
             "cores": "1",
             "ram": "512M",
             "almacenamiento": "1G",
-            "id_flavor_openstack": "4e1f4af0-9b1c-45e5-9bc8-3f9cda74bf19",
+            "id_flavor_openstack": "c98c31aa-e307-4b7a-a603-aa54f48ea08c",
             "puerto_vnc": "",
-            "image": "1",
+            "image": "9d52b728-0b92-4973-8afc-1065239c53fe",
             "conexiones_vlans": "",
             "internet": "si",
             "server": ""
@@ -30,9 +30,9 @@
             "cores": "2",
             "ram": "1G",
             "almacenamiento": "2G",
-            "id_flavor_openstack": "4e1f4af0-9b1c-45e5-9bc8-3f9cda74bf19",
+            "id_flavor_openstack": "c98c31aa-e307-4b7a-a603-aa54f48ea08c",
             "puerto_vnc": "",
-            "image": "1",
+            "image": "9d52b728-0b92-4973-8afc-1065239c53fe",
             "conexiones_vlans": "",
             "internet": "no",
             "server": ""
@@ -43,9 +43,9 @@
             "cores": "2",
             "ram": "1G",
             "almacenamiento": "2G",
-            "id_flavor_openstack": "4e1f4af0-9b1c-45e5-9bc8-3f9cda74bf19",
+            "id_flavor_openstack": "c98c31aa-e307-4b7a-a603-aa54f48ea08c",
             "puerto_vnc": "",
-            "image": "1",
+            "image": "9d52b728-0b92-4973-8afc-1065239c53fe",
             "conexiones_vlans": "",
             "internet": "no",
             "server": ""
@@ -62,9 +62,9 @@
             "cores": "1",
             "ram": "512M",
             "almacenamiento": "1G",
-            "id_flavor_openstack": "4e1f4af0-9b1c-45e5-9bc8-3f9cda74bf19",
+            "id_flavor_openstack": "c98c31aa-e307-4b7a-a603-aa54f48ea08c",
             "puerto_vnc": "",
-            "image": "1",
+            "image": "9d52b728-0b92-4973-8afc-1065239c53fe",
             "conexiones_vlans": "",
             "internet": "si",
             "server": ""

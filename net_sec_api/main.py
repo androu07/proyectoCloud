@@ -421,21 +421,15 @@ def process_vlan_mapping(slice_id: int, zona_despliegue: str):
         
         logger.info(f"[NET_SEC] Slice {slice_id}: VLANs guardadas en BD")
         
-        # ========== NUEVO: Crear Security Groups en BD ==========
+        # ========== CREAR Security Group default en BD ==========
         try:
             logger.info(f"[NET_SEC] Slice {slice_id}: Inicializando Security Groups...")
-            import requests
-            sg_response = requests.post(
-                f"http://net_sec_api:5400/security-groups/initialize/{slice_id}",
-                headers={"Authorization": f"Bearer clavesihna"},
-                timeout=10
-            )
+            result = create_default_security_group(slice_id)
             
-            if sg_response.status_code == 200:
-                sg_result = sg_response.json()
-                logger.info(f"[NET_SEC] Slice {slice_id}: Security Group creado - ID {sg_result.get('security_group_id')}")
+            if result:
+                logger.info(f"[NET_SEC] Slice {slice_id}: Security Group creado - ID {result.get('id')}")
             else:
-                logger.warning(f"[NET_SEC] Slice {slice_id}: Error creando Security Group (no crítico): {sg_response.text}")
+                logger.warning(f"[NET_SEC] Slice {slice_id}: Error creando Security Group (no crítico)")
         except Exception as sg_error:
             logger.warning(f"[NET_SEC] Slice {slice_id}: Error creando Security Group (no crítico): {str(sg_error)}")
         

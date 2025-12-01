@@ -138,22 +138,25 @@ def process_vm_placement(slice_id: int, zona_despliegue: str, solicitud_json: di
         )
         
         if callback_response.status_code != 200:
-            logger.error(f"[VM_PLACEMENT] Slice {slice_id}: Error en callback a slice_manager: {callback_response.text}")
+            logger.error(f"[VM_PLACEMENT] Slice {slice_id}: Error HTTP en callback a slice_manager: {callback_response.text}")
             # Rollback del tracking
             tracker.remove_slice(zona_despliegue, slice_id)
             return False
         
+        # IMPORTANTE: Si callback respondió 200, siempre hacer ACK del mensaje RabbitMQ
+        # El slice_manager se encarga de actualizar BD con error si el despliegue falló
         callback_result = callback_response.json()
         
         if not callback_result.get('success'):
-            error_msg = callback_result.get('detail', 'Callback fallido')
-            logger.error(f"[VM_PLACEMENT] Slice {slice_id}: Callback fallido - {error_msg}")
+            error_msg = callback_result.get('error', callback_result.get('detail', 'Despliegue con errores'))
+            logger.warning(f"[VM_PLACEMENT] Slice {slice_id}: Callback reportó error - {error_msg}")
+            logger.warning(f"[VM_PLACEMENT] Estado guardado en BD por slice_manager, haciendo ACK para evitar reintentos")
             # Rollback del tracking
             tracker.remove_slice(zona_despliegue, slice_id)
-            return False
+        else:
+            logger.info(f"[VM_PLACEMENT] Slice {slice_id}: Despliegue completado exitosamente")
         
-        logger.info(f"[VM_PLACEMENT] Slice {slice_id}: Despliegue completado exitosamente")
-        
+        # Siempre retornar True si el callback fue HTTP 200 (para hacer ACK)
         return True
         
     except Exception as e:

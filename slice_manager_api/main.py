@@ -872,16 +872,126 @@ async def create_slice(
             )
         
         # ===== RETORNAR CONFIRMACIÓN =====
+        # NOTA: Cambio de comportamiento - ahora hace polling hasta que termine
+        logger.info(f"Slice {slice_id}: Iniciando polling cada 5s (máx 5 minutos)")
+        
+        import asyncio
+        max_attempts = 60  # 60 intentos * 5s = 5 minutos
+        attempt = 0
+        
+        while attempt < max_attempts:
+            await asyncio.sleep(5)  # Esperar 5 segundos
+            attempt += 1
+            
+            # Consultar estado en BD
+            try:
+                conn_poll = mysql.connector.connect(**DB_CONFIG)
+                cur_poll = conn_poll.cursor(dictionary=True)
+                cur_poll.execute("SELECT estado, tipo FROM slices WHERE id = %s", (slice_id,))
+                slice_status = cur_poll.fetchone()
+                cur_poll.close()
+                conn_poll.close()
+                
+                if not slice_status:
+                    logger.error(f"Slice {slice_id} desapareció de BD")
+                    break
+                
+                estado = slice_status['estado']
+                tipo = slice_status['tipo']
+                
+                logger.info(f"Slice {slice_id}: Polling {attempt}/{max_attempts} - estado={estado}, tipo={tipo}")
+                
+                # ===== CASO 1: DESPLIEGUE EXITOSO =====
+                if estado == 'corriendo' and tipo == 'desplegado':
+                    logger.info(f"Slice {slice_id}: ¡Desplegado exitosamente!")
+                    return {
+                        "success": True,
+                        "message": f"Slice {slice_id} desplegado exitosamente",
+                        "slice_id": slice_id,
+                        "nombre_slice": slice_request.nombre_slice,
+                        "zona_despliegue": zona,
+                        "estado": "corriendo",
+                        "tipo": "desplegado",
+                        "polling_attempts": attempt
+                    }
+                
+                # ===== CASO 2: ERROR EN DESPLIEGUE =====
+                if tipo == 'error' or estado == 'error_despliegue':
+                    logger.error(f"Slice {slice_id}: Error en despliegue, iniciando rollback...")
+                    
+                    # Hacer rollback completo: eliminar todo
+                    try:
+                        async with httpx.AsyncClient(timeout=120.0) as client:
+                            rollback_response = await client.post(
+                                f"{DRIVERS_URL}/delete-slice",
+                                json={
+                                    "slice_id": slice_id,
+                                    "zona_despliegue": zona
+                                },
+                                headers={"Authorization": f"Bearer {IMAGE_MANAGER_TOKEN}"}
+                            )
+                            logger.info(f"Slice {slice_id}: Rollback cluster: {rollback_response.json()}")
+                    except Exception as rb_error:
+                        logger.warning(f"Slice {slice_id}: Error en rollback cluster: {str(rb_error)}")
+                    
+                    # Eliminar security groups
+                    try:
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            sg_response = await client.delete(
+                                f"{DRIVERS_URL}/security-groups-{zona}/slice/{slice_id}",
+                                headers={"Authorization": f"Bearer {IMAGE_MANAGER_TOKEN}"}
+                            )
+                            logger.info(f"Slice {slice_id}: Rollback SG: {sg_response.json()}")
+                    except Exception as sg_error:
+                        logger.warning(f"Slice {slice_id}: Error en rollback SG: {str(sg_error)}")
+                    
+                    # Eliminar tracking
+                    try:
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            track_response = await client.delete(
+                                f"{VM_PLACEMENT_URL}/delete-assigned-resources/{slice_id}",
+                                params={"zona": zona},
+                                headers={"Authorization": f"Bearer {IMAGE_MANAGER_TOKEN}"}
+                            )
+                            logger.info(f"Slice {slice_id}: Rollback tracking: {track_response.json()}")
+                    except Exception as track_error:
+                        logger.warning(f"Slice {slice_id}: Error en rollback tracking: {str(track_error)}")
+                    
+                    # Eliminar de BD
+                    try:
+                        conn_del = mysql.connector.connect(**DB_CONFIG)
+                        cur_del = conn_del.cursor()
+                        cur_del.execute("DELETE FROM slices WHERE id = %s", (slice_id,))
+                        conn_del.commit()
+                        cur_del.close()
+                        conn_del.close()
+                        logger.info(f"Slice {slice_id}: Eliminado de BD")
+                    except Exception as db_error:
+                        logger.error(f"Slice {slice_id}: Error eliminando de BD: {str(db_error)}")
+                    
+                    return {
+                        "success": False,
+                        "message": f"Error en despliegue del slice {slice_id}. Rollback completado.",
+                        "slice_id": slice_id,
+                        "error": f"Estado: {estado}, Tipo: {tipo}",
+                        "rollback": "completed",
+                        "polling_attempts": attempt
+                    }
+                
+            except Exception as poll_error:
+                logger.error(f"Slice {slice_id}: Error en polling: {str(poll_error)}")
+                continue
+        
+        # ===== TIMEOUT =====
+        logger.warning(f"Slice {slice_id}: Timeout después de 5 minutos de polling")
         return {
-            "success": True,
-            "message": "Slice creado y encolado para procesamiento",
+            "success": False,
+            "message": f"Timeout: El slice {slice_id} aún está procesándose después de 5 minutos",
             "slice_id": slice_id,
             "nombre_slice": slice_request.nombre_slice,
             "zona_despliegue": zona,
-            "estado": "encolado",
-            "vlan_queue": vlan_queue,
-            "timestamp_creacion": timestamp_creacion,
-            "nota": "El slice será procesado asíncronamente. Use /slices/info/{id} para verificar estado"
+            "estado": "timeout",
+            "nota": "Use /slices/info/{id} para verificar estado manualmente"
         }
         
     except HTTPException:
@@ -1140,35 +1250,65 @@ async def deployment_ready_callback(
         simplified_vms = []
         for topology in solicitud_json.get('topologias', []):
             for vm in topology.get('vms', []):
-                # Construir flavor: cores;ram;almacenamiento
-                cores = vm.get('cores', '1')
-                ram = vm.get('ram', '512M')
-                almacenamiento = vm.get('almacenamiento', '1G')
-                flavor = f"{cores};{ram};{almacenamiento}"
-                
                 simplified_vm = {
                     'nombre': vm.get('nombre'),
-                    'flavor': flavor,
                     'image': vm.get('image'),
                     'conexiones_vlans': vm.get('conexiones_vlans', ''),
                     'server': vm.get('server')
                 }
+                
+                # Para Linux: construir flavor (cores;ram;almacenamiento)
+                # Para OpenStack: usar id_flavor_openstack directamente
+                if zona_despliegue == 'linux':
+                    cores = vm.get('cores', '1')
+                    ram = vm.get('ram', '512M')
+                    almacenamiento = vm.get('almacenamiento', '1G')
+                    simplified_vm['flavor'] = f"{cores};{ram};{almacenamiento}"
+                elif zona_despliegue == 'openstack':
+                    simplified_vm['id_flavor_openstack'] = vm.get('id_flavor_openstack')
+                
                 simplified_vms.append(simplified_vm)
         
-        # Payload simplificado
-        simplified_json = {
-            'zona_despliegue': zona_despliegue,
-            'id_slice': str(slice_id),
-            'topologias': [
-                {
-                    'vms': simplified_vms
-                }
-            ]
-        }
+        # Payload simplificado - diferente estructura según zona
+        if zona_despliegue == 'linux':
+            # Linux: estructura con topologias
+            simplified_json = {
+                'zona_despliegue': zona_despliegue,
+                'id_slice': str(slice_id),
+                'topologias': [
+                    {
+                        'vms': simplified_vms
+                    }
+                ]
+            }
+        elif zona_despliegue == 'openstack':
+            # OpenStack: lista plana de vms (sin topologias)
+            simplified_json = {
+                'zona_despliegue': zona_despliegue,
+                'id_slice': str(slice_id),
+                'vms': simplified_vms
+            }
+        else:
+            # Fallback para otras zonas
+            simplified_json = {
+                'zona_despliegue': zona_despliegue,
+                'id_slice': str(slice_id),
+                'topologias': [
+                    {
+                        'vms': simplified_vms
+                    }
+                ]
+            }
         
         driver_payload = {
             "json_config": simplified_json
         }
+        
+        # ============ LOGGING DEL JSON SIMPLIFICADO ============
+        logger.info(f"[SLICE_MANAGER] Slice {slice_id}: JSON SIMPLIFICADO CONSTRUIDO:")
+        logger.info(f"{'='*100}")
+        logger.info(json.dumps(simplified_json, indent=2, ensure_ascii=False))
+        logger.info(f"{'='*100}")
         
         logger.info(f"[SLICE_MANAGER] Slice {slice_id}: Llamando a drivers con JSON simplificado...")
         
@@ -1181,8 +1321,8 @@ async def deployment_ready_callback(
             )
         
         if driver_response.status_code != 200:
-            logger.error(f"[SLICE_MANAGER] Slice {slice_id}: Error en drivers: {driver_response.text}")
-            # Actualizar estado a error
+            logger.error(f"[SLICE_MANAGER] Slice {slice_id}: Error HTTP en drivers: {driver_response.text}")
+            # Actualizar estado a error en BD
             connection = mysql.connector.connect(**DB_CONFIG)
             cursor = connection.cursor()
             cursor.execute("UPDATE slices SET estado = %s, tipo = %s WHERE id = %s", 
@@ -1190,17 +1330,21 @@ async def deployment_ready_callback(
             connection.commit()
             cursor.close()
             connection.close()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error en despliegue: {driver_response.text}"
-            )
+            # IMPORTANTE: Retornar success=True para que vm_placement haga ACK y NO reencole
+            # El error ya quedó registrado en BD
+            return {
+                "success": True,
+                "message": f"Error HTTP en despliegue (registrado en BD)",
+                "slice_id": slice_id,
+                "error": driver_response.text
+            }
         
         driver_result = driver_response.json()
         
         if not driver_result.get('success'):
-            error_msg = driver_result.get('error', 'Despliegue fallido')
+            error_msg = driver_result.get('error', 'Despliegue fallido en orquestador')
             logger.error(f"[SLICE_MANAGER] Slice {slice_id}: Despliegue fallido - {error_msg}")
-            # Actualizar estado a error
+            # Actualizar estado a error en BD
             connection = mysql.connector.connect(**DB_CONFIG)
             cursor = connection.cursor()
             cursor.execute("UPDATE slices SET estado = %s, tipo = %s WHERE id = %s", 
@@ -1208,27 +1352,39 @@ async def deployment_ready_callback(
             connection.commit()
             cursor.close()
             connection.close()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Despliegue fallido: {error_msg}"
-            )
+            # IMPORTANTE: Retornar success=True para que vm_placement haga ACK y NO reencole
+            # El error ya quedó registrado en BD
+            return {
+                "success": True,
+                "message": f"Error en orquestador (registrado en BD)",
+                "slice_id": slice_id,
+                "error": error_msg
+            }
         
-        # ==== PASO 4: Actualizar puerto_vnc en vms ====
-        vnc_mapping = driver_result.get('vnc_mapping', {})
-        
-        logger.info(f"[SLICE_MANAGER] Slice {slice_id}: Despliegue exitoso, actualizando VNC en BD...")
-        logger.info(f"[SLICE_MANAGER] VNC mapping recibido: {vnc_mapping}")
-        
-        # Actualizar puerto_vnc en cada VM
-        for vm in all_vms:
-            vm_name = vm.get('nombre')
-            if vm_name in vnc_mapping:
-                vm['puerto_vnc'] = str(vnc_mapping[vm_name])
+        # ==== PASO 4: Actualizar puerto_vnc en vms (solo para Linux) ====
+        # OpenStack NO usa VNC, Linux sí
+        if zona_despliegue == 'linux':
+            vnc_mapping = driver_result.get('vnc_mapping', {})
+            
+            logger.info(f"[SLICE_MANAGER] Slice {slice_id}: Despliegue exitoso, actualizando VNC en BD...")
+            logger.info(f"[SLICE_MANAGER] VNC mapping recibido: {vnc_mapping}")
+            
+            # Actualizar puerto_vnc en cada VM
+            for vm in all_vms:
+                vm_name = vm.get('nombre')
+                if vnc_mapping and vm_name in vnc_mapping:
+                    vm['puerto_vnc'] = str(vnc_mapping[vm_name])
+                    vm['estado'] = 'Corriendo'
+                else:
+                    logger.warning(f"[SLICE_MANAGER] No se encontró VNC para VM {vm_name}")
+                    vm['puerto_vnc'] = ''
+                    vm['estado'] = 'Error'
+        else:
+            # OpenStack: solo actualizar estado
+            logger.info(f"[SLICE_MANAGER] Slice {slice_id}: Despliegue OpenStack exitoso")
+            for vm in all_vms:
                 vm['estado'] = 'Corriendo'
-            else:
-                logger.warning(f"[SLICE_MANAGER] No se encontró VNC para VM {vm_name}")
-                vm['puerto_vnc'] = ''
-                vm['estado'] = 'Error'
+                vm['puerto_vnc'] = 'N/A'  # OpenStack no usa VNC en este sistema
         
         # Timestamp de despliegue
         lima_tz = pytz.timezone('America/Lima')
@@ -1261,14 +1417,19 @@ async def deployment_ready_callback(
         
         logger.info(f"[SLICE_MANAGER] Slice {slice_id}: BD actualizada - {len(all_vms)} VMs desplegadas")
         
-        return {
+        response_data = {
             "success": True,
             "message": f"Slice {slice_id} desplegado y actualizado exitosamente",
             "slice_id": slice_id,
             "total_vms": len(all_vms),
-            "estado": "corriendo",
-            "vnc_ports": vnc_mapping
+            "estado": "corriendo"
         }
+        
+        # Agregar vnc_ports solo para Linux
+        if zona_despliegue == 'linux':
+            response_data["vnc_ports"] = driver_result.get('vnc_mapping', {})
+        
+        return response_data
         
     except HTTPException:
         raise
@@ -1329,21 +1490,12 @@ async def delete_slice(
                     detail="Solo se pueden eliminar slices desplegados"
                 )
         
-        # Extraer zona_despliegue del peticion_json
-        peticion_json = slice_data['peticion_json']
-        if isinstance(peticion_json, str):
-            peticion_json = json.loads(peticion_json)
-        
-        # Buscar zona_despliegue en la raíz o en solicitud_json
-        zona_despliegue = peticion_json.get('zona_despliegue')
-        if not zona_despliegue and 'solicitud_json' in peticion_json:
-            zona_despliegue = peticion_json.get('zona_despliegue', 'linux')
-        if not zona_despliegue:
-            zona_despliegue = 'linux'  # Default
+        # Obtener zona_disponibilidad directamente de la BD
+        zona_despliegue = slice_data.get('zona_disponibilidad', 'linux')
         
         logger.info(f"Eliminando slice {slice_id} de zona {zona_despliegue}")
         
-        # Llamar a drivers para eliminar en el cluster
+        # ==== PASO 1: Llamar a drivers para eliminar en el cluster ====
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
                 delete_response = await client.post(
@@ -1358,29 +1510,33 @@ async def delete_slice(
                 delete_result = delete_response.json()
                 
                 if delete_response.status_code != 200 or not delete_result.get('success'):
-                    cursor.close()
-                    connection.close()
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail=f"Error al eliminar slice en cluster: {delete_result.get('error', 'Unknown error')}"
-                    )
+                    logger.warning(f"Error eliminando en cluster: {delete_result.get('error', 'Unknown')}")
                 
         except httpx.TimeoutException:
-            cursor.close()
-            connection.close()
-            raise HTTPException(
-                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                detail="Timeout al eliminar slice en cluster"
-            )
+            logger.warning(f"Timeout eliminando slice en cluster (continuando con limpieza)")
         except httpx.ConnectError:
-            cursor.close()
-            connection.close()
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="No se pudo conectar con el servicio de drivers"
-            )
+            logger.warning(f"Error conectando con drivers (continuando con limpieza)")
+        except Exception as e:
+            logger.warning(f"Error eliminando en cluster: {str(e)} (continuando con limpieza)")
         
-        # Eliminar recursos asignados del tracking de VM placement
+        # ==== PASO 2: Eliminar security groups del slice ====
+        try:
+            logger.info(f"Eliminando security groups del slice {slice_id}")
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                sg_response = await client.delete(
+                    f"{DRIVERS_URL}/security-groups-{zona_despliegue}/slice/{slice_id}",
+                    headers={"Authorization": f"Bearer {IMAGE_MANAGER_TOKEN}"}
+                )
+                
+                if sg_response.status_code == 200:
+                    sg_result = sg_response.json()
+                    logger.info(f"Security groups eliminados: {sg_result.get('deleted_count', 0)}")
+                else:
+                    logger.warning(f"Error eliminando security groups (no crítico): {sg_response.text}")
+        except Exception as sg_error:
+            logger.warning(f"No se pudieron eliminar security groups (no crítico): {str(sg_error)}")
+        
+        # ==== PASO 3: Eliminar recursos asignados del tracking de VM placement ====
         try:
             logger.info(f"Eliminando recursos de tracking para slice {slice_id} en zona {zona_despliegue}")
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -1396,10 +1552,9 @@ async def delete_slice(
                 else:
                     logger.warning(f"Error al limpiar tracking (no crítico): {tracking_response.text}")
         except Exception as track_error:
-            # No crítico - continuar con eliminación de BD
             logger.warning(f"No se pudo limpiar tracking (no crítico): {str(track_error)}")
         
-        # Eliminar slice de la BD
+        # ==== PASO 4: Eliminar slice de la BD ====
         delete_query = "DELETE FROM slices WHERE id = %s"
         cursor.execute(delete_query, (slice_id,))
         connection.commit()

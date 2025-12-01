@@ -30,9 +30,9 @@ ORCHESTRATORS = {
         'base_url': 'http://192.168.203.1:5805'
     },
     'openstack': {
-        'host': 'TBD',
-        'port': 0,
-        'base_url': None  # Por implementar
+        'host': '192.168.204.1',
+        'port': 5805,
+        'base_url': 'http://192.168.204.1:5805'
     }
 }
 
@@ -41,6 +41,13 @@ SECURITY_API_LINUX = {
     'host': '192.168.203.1',
     'port': 5811,
     'base_url': 'http://192.168.203.1:5811'
+}
+
+# Security Groups API (headnode OpenStack)
+SECURITY_API_OPENSTACK = {
+    'host': '192.168.204.1',
+    'port': 5811,
+    'base_url': 'http://192.168.204.1:5811'
 }
 
 # Configuración de BD de slices
@@ -74,7 +81,10 @@ class DeploySliceResponse(BaseModel):
     message: str
     zone: str
     slice_id: Optional[int] = None
-    vnc_mapping: Optional[Dict[str, int]] = None  # {vm_name: vnc_port}
+    vnc_mapping: Optional[Dict[str, int]] = None  # {vm_name: vnc_port} - Linux
+    project_id: Optional[str] = None  # OpenStack project ID
+    default_sg_rules: Optional[list] = None  # OpenStack default SG rules
+    deployment_details: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
 
 class DeleteSliceRequest(BaseModel):
@@ -115,9 +125,9 @@ class OperationResponse(BaseModel):
 class CreateCustomSGRequest(BaseModel):
     """Crear security group personalizado"""
     slice_id: int
-    id_sg: Optional[int] = None  # Si no se provee, se genera automáticamente desde BD
+    nombre: str  # Nombre del SG para la UI (ej: "Web Server")
+    descripcion: str  # Descripción del SG para la UI
     zona_despliegue: str
-    workers: Optional[str] = None  # Si no se provee, se obtiene automáticamente de BD
 
 class AddRuleRequest(BaseModel):
     """Agregar regla a security group"""
@@ -131,6 +141,7 @@ class AddRuleRequest(BaseModel):
     protocol: str = "any"
     port_range: str = "any"
     remote_ip_prefix: Optional[str] = None
+    ether_type: Optional[str] = "IPv4"  # IPv4 o IPv6
     icmp_type: Optional[str] = None
     icmp_code: Optional[str] = None
     description: str = ""
@@ -165,6 +176,8 @@ class SecurityGroupResponse(BaseModel):
     message: str
     zone: str
     slice_id: int
+    id_sg: Optional[int] = None
+    sg_id: Optional[str] = None  # ID de OpenStack (UUID)
     error: Optional[str] = None
 
 class SecurityGroupStatusRequest(BaseModel):
@@ -176,7 +189,11 @@ class SecurityGroupStatusRequest(BaseModel):
 class SecurityGroupStatusResponse(BaseModel):
     """Respuesta de consulta de estado de security groups"""
     success: bool
+    message: str
+    zone: str
     slice_id: int
+    security_groups: Optional[list] = None
+    project_id: Optional[str] = None
     workers_status: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
 
@@ -637,6 +654,205 @@ def delete_default_sg_from_db(slice_id: int):
         if connection:
             connection.close()
 
+def update_custom_sg_default_rules(id_sg: int, default_rules: list):
+    """
+    Actualizar las reglas por defecto de un SG custom con los UUIDs de OpenStack
+    
+    Args:
+        id_sg: ID del security group en BD
+        default_rules: Lista de strings "id:N;uuid:..." del orquestador OpenStack
+    """
+    connection = None
+    cursor = None
+    
+    try:
+        connection = mysql.connector.connect(**SG_DB_CONFIG)
+        cursor = connection.cursor(dictionary=True)
+        
+        # Obtener el SG
+        query = "SELECT id, rules FROM security_groups WHERE id = %s"
+        cursor.execute(query, (id_sg,))
+        result = cursor.fetchone()
+        
+        if not result:
+            logger.warning(f"SG con ID {id_sg} no encontrado")
+            return
+        
+        # Parsear default_rules y crear mapeo id -> uuid
+        uuid_mapping = {}
+        for rule_str in default_rules:
+            parts = rule_str.split(';')
+            rule_id = None
+            uuid = None
+            for part in parts:
+                if part.startswith('id:'):
+                    rule_id = int(part.split(':')[1])
+                elif part.startswith('uuid:'):
+                    uuid = part.split(':', 1)[1]
+            if rule_id and uuid:
+                uuid_mapping[rule_id] = uuid
+        
+        # Crear las 2 reglas egress por defecto
+        default_egress_rules = [
+            {
+                "id": 1,
+                "direction": "egress",
+                "ether_type": "IPv4",
+                "protocol": "any",
+                "port_range": "any",
+                "remote_ip_prefix": "0.0.0.0/0",
+                "remote_security_group": None,
+                "description": "Permitir todo tráfico saliente IPv4",
+                "id_openstack": uuid_mapping.get(1)
+            },
+            {
+                "id": 2,
+                "direction": "egress",
+                "ether_type": "IPv6",
+                "protocol": "any",
+                "port_range": "any",
+                "remote_ip_prefix": "::/0",
+                "remote_security_group": None,
+                "description": "Permitir todo tráfico saliente IPv6",
+                "id_openstack": uuid_mapping.get(2)
+            }
+        ]
+        
+        # Guardar reglas
+        rules_json = json.dumps(default_egress_rules)
+        update_query = "UPDATE security_groups SET rules = %s WHERE id = %s"
+        cursor.execute(update_query, (rules_json, result['id']))
+        connection.commit()
+        
+        logger.info(f"Reglas por defecto actualizadas en SG con ID {id_sg}")
+        
+    except Exception as e:
+        logger.error(f"Error actualizando reglas por defecto: {str(e)}")
+        if connection:
+            connection.rollback()
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+def update_default_sg_rules_with_uuids(slice_id: int, default_sg_rules: list):
+    """
+    Actualizar las reglas del SG default con los UUIDs de OpenStack
+    
+    Args:
+        slice_id: ID del slice
+        default_sg_rules: Lista de strings "id:N;uuid:..." del orquestador OpenStack
+    """
+    connection = None
+    cursor = None
+    
+    try:
+        connection = mysql.connector.connect(**SG_DB_CONFIG)
+        cursor = connection.cursor(dictionary=True)
+        
+        # Obtener el SG default del slice
+        query = "SELECT id, rules FROM security_groups WHERE slice_id = %s AND is_default = TRUE"
+        cursor.execute(query, (slice_id,))
+        result = cursor.fetchone()
+        
+        if not result:
+            logger.warning(f"SG default no encontrado para slice {slice_id}")
+            return
+        
+        rules = json.loads(result['rules']) if result['rules'] else []
+        
+        # Parsear default_sg_rules y crear mapeo id -> uuid
+        uuid_mapping = {}
+        for rule_str in default_sg_rules:
+            # Formato: "id:1;uuid:abc-123-..."
+            parts = rule_str.split(';')
+            rule_id = None
+            uuid = None
+            for part in parts:
+                if part.startswith('id:'):
+                    rule_id = int(part.split(':')[1])
+                elif part.startswith('uuid:'):
+                    uuid = part.split(':', 1)[1]
+            if rule_id and uuid:
+                uuid_mapping[rule_id] = uuid
+        
+        # Actualizar cada regla con su UUID
+        for rule in rules:
+            rule_id = rule.get('id')
+            if rule_id in uuid_mapping:
+                rule['id_openstack'] = uuid_mapping[rule_id]
+        
+        # Guardar reglas actualizadas
+        rules_json = json.dumps(rules)
+        update_query = "UPDATE security_groups SET rules = %s WHERE id = %s"
+        cursor.execute(update_query, (rules_json, result['id']))
+        connection.commit()
+        
+        logger.info(f"UUIDs de OpenStack actualizados en SG default del slice {slice_id} ({len(uuid_mapping)} reglas)")
+        
+    except Exception as e:
+        logger.error(f"Error actualizando UUIDs de OpenStack: {str(e)}")
+        if connection:
+            connection.rollback()
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+def get_openstack_rule_uuid(slice_id: int, sg_name: str, rule_id: int) -> Optional[str]:
+    """
+    Obtener el UUID de OpenStack de una regla a partir del ID secuencial
+    
+    Args:
+        slice_id: ID del slice
+        sg_name: Nombre del SG (None = default)
+        rule_id: ID secuencial de la regla
+        
+    Returns:
+        UUID de OpenStack o None si no se encuentra
+    """
+    connection = None
+    cursor = None
+    
+    try:
+        connection = mysql.connector.connect(**SG_DB_CONFIG)
+        cursor = connection.cursor(dictionary=True)
+        
+        # Determinar nombre del SG
+        if sg_name is None:
+            query = "SELECT rules FROM security_groups WHERE slice_id = %s AND is_default = TRUE"
+            cursor.execute(query, (slice_id,))
+        else:
+            query = "SELECT rules FROM security_groups WHERE slice_id = %s AND name = %s"
+            cursor.execute(query, (slice_id, sg_name))
+        
+        result = cursor.fetchone()
+        
+        if not result:
+            logger.warning(f"SG no encontrado en BD (slice {slice_id}, name={sg_name})")
+            return None
+        
+        rules = json.loads(result['rules']) if result['rules'] else []
+        
+        # Buscar la regla con el ID secuencial
+        for rule in rules:
+            if rule.get('id') == rule_id:
+                return rule.get('id_openstack')  # Campo actualizado
+        
+        logger.warning(f"Regla {rule_id} no encontrada en SG")
+        return None
+        
+    except Exception as e:
+        logger.error(f"Error obteniendo UUID de OpenStack: {str(e)}")
+        return None
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
 # Funciones auxiliares
 async def call_linux_orchestrator(endpoint: str, method: str = "POST", 
                                   payload: Optional[Dict] = None, 
@@ -1062,6 +1278,232 @@ async def start_slice_linux(slice_id: int) -> Dict[str, Any]:
             'connection_failed': False
         }
 
+# =============================================================================
+# FUNCIONES AUXILIARES PARA OPENSTACK
+# =============================================================================
+
+async def call_openstack_orchestrator(endpoint: str, method: str = "POST", 
+                                      payload: Optional[Dict] = None, 
+                                      timeout: int = 300) -> Dict[str, Any]:
+    """
+    Llamada al orquestador OpenStack (main.py)
+    
+    Args:
+        endpoint: Endpoint de la API (ej: /deploy-topology, /delete-slice/{id})
+        method: Método HTTP (POST, DELETE)
+        payload: Datos a enviar
+        timeout: Timeout en segundos (5 min por defecto para despliegues)
+    
+    Returns:
+        Dict con resultado de la llamada
+    """
+    try:
+        orchestrator = ORCHESTRATORS['openstack']
+        url = f"{orchestrator['base_url']}{endpoint}"
+        
+        logger.info(f"Llamando a orquestador OpenStack: {url}")
+        
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            if method == "POST":
+                response = await client.post(url, json=payload)
+            elif method == "DELETE":
+                response = await client.delete(url)
+            else:
+                response = await client.get(url)
+        
+        if response.status_code == 200:
+            return {
+                'success': True,
+                'status_code': 200,
+                'data': response.json()
+            }
+        else:
+            logger.error(f"Error del orquestador OpenStack: {response.status_code} - {response.text}")
+            return {
+                'success': False,
+                'status_code': response.status_code,
+                'error': response.text
+            }
+            
+    except httpx.TimeoutException:
+        logger.error(f"Timeout conectando al orquestador OpenStack")
+        return {
+            'success': False,
+            'error': 'timeout',
+            'message': 'Timeout conectando con el orquestador OpenStack'
+        }
+    except httpx.ConnectError:
+        logger.error(f"Error de conexión al orquestador OpenStack")
+        return {
+            'success': False,
+            'error': 'connection_error',
+            'message': f'No se pudo conectar con el orquestador OpenStack en {orchestrator["base_url"]}'
+        }
+    except Exception as e:
+        logger.error(f"Error interno llamando al orquestador OpenStack: {str(e)}")
+        return {
+            'success': False,
+            'error': 'internal_error',
+            'message': f'Error interno: {str(e)}'
+        }
+
+async def call_security_api_openstack(endpoint: str, method: str = "POST",
+                                       payload: Optional[Dict] = None,
+                                       timeout: int = 30) -> Dict[str, Any]:
+    """
+    Llamada a la Security Groups API OpenStack (security_api.py)
+    
+    Args:
+        endpoint: Endpoint de la API (ej: /create-custom, /add-rule)
+        method: Método HTTP (POST, GET)
+        payload: Datos a enviar
+        timeout: Timeout en segundos
+    
+    Returns:
+        Dict con resultado de la llamada
+    """
+    try:
+        api = SECURITY_API_OPENSTACK
+        url = f"{api['base_url']}{endpoint}"
+        
+        logger.info(f"Llamando a Security Groups API OpenStack: {url}")
+        
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            if method == "POST":
+                response = await client.post(url, json=payload)
+            elif method == "GET":
+                response = await client.get(url)
+            else:
+                return {'success': False, 'error': f'Método {method} no soportado'}
+        
+        if response.status_code == 200:
+            return {
+                'success': True,
+                'status_code': 200,
+                'data': response.json()
+            }
+        else:
+            logger.error(f"Error de Security API OpenStack: {response.status_code} - {response.text}")
+            return {
+                'success': False,
+                'status_code': response.status_code,
+                'error': response.text
+            }
+    
+    except httpx.TimeoutException:
+        logger.error("Timeout conectando a Security Groups API OpenStack")
+        return {
+            'success': False,
+            'error': 'timeout',
+            'message': 'Timeout conectando con Security Groups API OpenStack'
+        }
+    except httpx.ConnectError:
+        logger.error("Error de conexión a Security Groups API OpenStack")
+        return {
+            'success': False,
+            'error': 'connection_error',
+            'message': f'No se pudo conectar con Security Groups API OpenStack en {api["base_url"]}'
+        }
+    except Exception as e:
+        logger.error(f"Error interno llamando a Security API OpenStack: {str(e)}")
+        return {
+            'success': False,
+            'error': 'internal_error',
+            'message': f'Error interno: {str(e)}'
+        }
+
+async def deploy_to_openstack(json_config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Despliega un slice en el cluster OpenStack
+    
+    Llama al endpoint /deploy-topology del main.py de OpenStack
+    """
+    logger.info(f"Iniciando despliegue en cluster OpenStack")
+    
+    payload = {
+        "json_config": json_config
+    }
+    
+    result = await call_openstack_orchestrator("/deploy-topology", "POST", payload, timeout=300)
+    
+    if not result['success']:
+        return {
+            'success': False,
+            'message': 'Error comunicándose con el orquestador OpenStack',
+            'error': result.get('message', result.get('error', 'Unknown error')),
+            'connection_failed': result.get('error') in ['timeout', 'connection_error']
+        }
+    
+    response_data = result['data']
+    
+    # Verificar si el despliegue fue exitoso
+    if response_data.get('status') == 'success':
+        logger.info(f"Despliegue exitoso en cluster OpenStack")
+        
+        # LOG: Imprimir respuesta del orquestador
+        logger.info(f"RESPUESTA DEL ORQUESTADOR OPENSTACK:")
+        logger.info(json.dumps(response_data, indent=2, ensure_ascii=False))
+        
+        # OpenStack devuelve: project_id, default_sg_rules
+        project_id = response_data.get('project_id')
+        default_sg_rules = response_data.get('default_sg_rules', [])
+        
+        # Actualizar BD con los UUIDs de las reglas default
+        slice_id = json_config.get('id_slice')
+        if slice_id and default_sg_rules:
+            update_default_sg_rules_with_uuids(int(slice_id), default_sg_rules)
+        
+        return {
+            'success': True,
+            'message': response_data.get('message', 'Despliegue exitoso'),
+            'project_id': project_id,
+            'default_sg_rules': default_sg_rules
+        }
+    else:
+        logger.error(f"Error en despliegue OpenStack: {response_data.get('message')}")
+        return {
+            'success': False,
+            'message': 'Error durante el despliegue en cluster OpenStack',
+            'error': response_data.get('message', 'Unknown deployment error'),
+            'connection_failed': False
+        }
+
+async def delete_from_openstack(slice_id: int) -> Dict[str, Any]:
+    """
+    Elimina un slice del cluster OpenStack
+    
+    Llama al endpoint /delete-slice/{slice_id} del main.py de OpenStack
+    """
+    logger.info(f"Iniciando eliminación del slice {slice_id} en cluster OpenStack")
+    
+    result = await call_openstack_orchestrator(f"/delete-slice/{slice_id}", "DELETE", timeout=120)
+    
+    if not result['success']:
+        return {
+            'success': False,
+            'message': 'Error comunicándose con el orquestador OpenStack',
+            'error': result.get('message', result.get('error', 'Unknown error')),
+            'connection_failed': result.get('error') in ['timeout', 'connection_error']
+        }
+    
+    response_data = result['data']
+    
+    if response_data.get('status') == 'success':
+        logger.info(f"Eliminación exitosa del slice {slice_id}")
+        return {
+            'success': True,
+            'message': response_data.get('message', 'Slice eliminado exitosamente'),
+            'deletion_details': response_data.get('deletion_details')
+        }
+    else:
+        logger.error(f"Error eliminando slice {slice_id}: {response_data.get('message')}")
+        return {
+            'success': False,
+            'message': 'Error durante la eliminación en cluster OpenStack',
+            'error': response_data.get('message', 'Unknown deletion error'),
+            'connection_failed': False
+        }
+
 # Endpoints
 @app.get("/")
 async def root():
@@ -1127,21 +1569,15 @@ async def deploy_slice(
                 detail=f"Zona de despliegue '{zona_despliegue}' no soportada. Zonas válidas: {list(ORCHESTRATORS.keys())}"
             )
         
-        # Validar que el orquestador esté configurado
-        if zona_despliegue == 'openstack' and ORCHESTRATORS['openstack']['base_url'] is None:
-            raise HTTPException(
-                status_code=status.HTTP_501_NOT_IMPLEMENTED,
-                detail="Orquestador OpenStack aún no implementado"
-            )
-        
         # Desplegar según zona
         if zona_despliegue == 'linux':
             result = await deploy_to_linux(json_config)
+        elif zona_despliegue == 'openstack':
+            result = await deploy_to_openstack(json_config)
         else:
-            # Placeholder para OpenStack
             raise HTTPException(
                 status_code=status.HTTP_501_NOT_IMPLEMENTED,
-                detail="Despliegue en OpenStack no implementado aún"
+                detail=f"Despliegue en {zona_despliegue} no implementado"
             )
         
         # Analizar resultado
@@ -1173,13 +1609,22 @@ async def deploy_slice(
             # Despliegue exitoso
             logger.info(f"Despliegue exitoso para slice {slice_id}")
             
-            return DeploySliceResponse(
-                success=True,
-                message=f"Slice {slice_id} desplegado exitosamente en {zona_despliegue}",
-                zone=zona_despliegue,
-                slice_id=slice_id,
-                vnc_mapping=result.get('vnc_mapping', {})
-            )
+            # Preparar respuesta según zona
+            response_data = {
+                "success": True,
+                "message": f"Slice {slice_id} desplegado exitosamente en {zona_despliegue}",
+                "zone": zona_despliegue,
+                "slice_id": slice_id
+            }
+            
+            # Agregar campos específicos según zona
+            if zona_despliegue == 'linux':
+                response_data["vnc_mapping"] = result.get('vnc_mapping', {})
+            elif zona_despliegue == 'openstack':
+                response_data["project_id"] = result.get('project_id')
+                response_data["default_sg_rules"] = result.get('default_sg_rules', [])
+            
+            return DeploySliceResponse(**response_data)
         
     except HTTPException:
         raise
@@ -1221,10 +1666,12 @@ async def delete_slice(
         # Eliminar según zona
         if zona_despliegue == 'linux':
             result = await delete_from_linux(slice_id)
+        elif zona_despliegue == 'openstack':
+            result = await delete_from_openstack(slice_id)
         else:
             raise HTTPException(
                 status_code=status.HTTP_501_NOT_IMPLEMENTED,
-                detail="Eliminación en OpenStack no implementada aún"
+                detail=f"Eliminación en {zona_despliegue} no implementada"
             )
         
         # Analizar resultado
@@ -2450,6 +2897,588 @@ async def remove_default_security_group(
         raise
     except Exception as e:
         logger.error(f"Error en remove-default-security-group: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno: {str(e)}"
+        )
+
+# =============================================================================
+# ENDPOINTS SECURITY GROUPS - OPENSTACK
+# =============================================================================
+
+@app.post("/security-groups-openstack/status", response_model=SecurityGroupStatusResponse)
+async def get_sg_status_openstack(
+    request: SecurityGroupStatusRequest,
+    authorized: bool = Depends(get_service_auth)
+):
+    """
+    Obtener estado de los security groups de un slice en OpenStack
+    """
+    try:
+        zona = request.zona_despliegue.lower()
+        
+        logger.info(f"Consultando estado de Security Groups del slice {request.slice_id} en OpenStack")
+        
+        if zona != 'openstack':
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Zona '{zona}' no válida para endpoint OpenStack"
+            )
+        
+        result = await call_security_api_openstack(
+            "/status",
+            method="POST",
+            payload={"slice_id": request.slice_id}
+        )
+        
+        if not result['success']:
+            return SecurityGroupStatusResponse(
+                success=False,
+                message=result.get('message', 'Error consultando estado'),
+                zone=zona,
+                slice_id=request.slice_id,
+                error=result.get('error')
+            )
+        
+        data = result.get('data', {})
+        return SecurityGroupStatusResponse(
+            success=data.get('status') == 'success',
+            message=data.get('message', 'Estado obtenido exitosamente'),
+            zone=zona,
+            slice_id=request.slice_id,
+            security_groups=data.get('security_groups', []),
+            project_id=data.get('project_id')
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error en get-sg-status-openstack: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno: {str(e)}"
+        )
+
+@app.post("/security-groups-openstack/create-custom", response_model=SecurityGroupResponse)
+async def create_custom_sg_openstack(
+    request: CreateCustomSGRequest,
+    authorized: bool = Depends(get_service_auth)
+):
+    """
+    Crear security group personalizado en OpenStack
+    """
+    try:
+        zona = request.zona_despliegue.lower()
+        
+        logger.info(f"Creando Security Group custom '{request.nombre}' para slice {request.slice_id} en OpenStack")
+        
+        if zona != 'openstack':
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Zona '{zona}' no válida para endpoint OpenStack"
+            )
+        
+        # SIEMPRE crear primero en BD para obtener id_sg autogenerado
+        # create_sg_in_db crea con nombre temporal, luego lo actualiza a SG_{id_sg}
+        id_sg = create_sg_in_db(request.slice_id, request.descripcion)
+        logger.info(f"SG creado en BD con ID autogenerado: {id_sg}, nombre: SG_{id_sg}")
+        
+        # Crear en OpenStack
+        result = await call_security_api_openstack(
+            "/create-custom",
+            method="POST",
+            payload={
+                "slice_id": request.slice_id,
+                "id_sg": id_sg
+            }
+        )
+        
+        if not result['success']:
+            # Rollback: eliminar de BD
+            delete_sg_from_db(id_sg)
+            return SecurityGroupResponse(
+                success=False,
+                message=result.get('message', 'Error creando security group'),
+                zone=zona,
+                slice_id=request.slice_id,
+                error=result.get('error')
+            )
+        
+        data = result.get('data', {})
+        
+        if data.get('status') != 'success':
+            # Rollback: eliminar de BD
+            delete_sg_from_db(id_sg)
+            return SecurityGroupResponse(
+                success=False,
+                message=data.get('message', 'Error en OpenStack'),
+                zone=zona,
+                slice_id=request.slice_id,
+                error=data.get('message')
+            )
+        
+        # Actualizar BD con las 2 reglas por defecto (egress IPv4 e IPv6)
+        default_rules = data.get('default_rules', [])
+        if default_rules:
+            update_custom_sg_default_rules(id_sg, default_rules)
+            logger.info(f"Reglas por defecto sincronizadas: {len(default_rules)} reglas (id:1 egress IPv4, id:2 egress IPv6)")
+        
+        return SecurityGroupResponse(
+            success=True,
+            message=data.get('message', f'Security Group {id_sg} creado (BD sincronizada con {len(default_rules)} reglas)'),
+            zone=zona,
+            slice_id=request.slice_id,
+            id_sg=id_sg,
+            sg_id=data.get('sg_id')
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error en create-custom-sg-openstack: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno: {str(e)}"
+        )
+
+@app.post("/security-groups-openstack/add-rule", response_model=SecurityGroupResponse)
+async def add_rule_to_sg_openstack(
+    request: AddRuleRequest,
+    authorized: bool = Depends(get_service_auth)
+):
+    """
+    Agregar regla a security group en OpenStack
+    """
+    try:
+        zona = request.zona_despliegue.lower()
+        
+        logger.info(f"Agregando regla al SG del slice {request.slice_id} en OpenStack")
+        
+        if zona != 'openstack':
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Zona '{zona}' no válida para endpoint OpenStack"
+            )
+        
+        # Determinar nombre del SG
+        if request.id_sg is not None:
+            sg_name = f"SG_{request.id_sg}"
+        else:
+            sg_name = "default"
+        
+        # Obtener siguiente rule_id si no se proporciona
+        if request.rule_id is None:
+            rule_id = get_next_rule_id(request.slice_id, sg_name)
+            logger.info(f"Próximo rule_id generado: {rule_id} para SG '{sg_name}'")
+        else:
+            rule_id = request.rule_id
+        
+        # Construir payload para OpenStack
+        payload = {
+            "slice_id": request.slice_id,
+            "direction": request.direction,
+            "ether_type": request.ether_type or "IPv4",
+            "remote_ip_prefix": request.remote_ip_prefix or "0.0.0.0/0"
+        }
+        
+        # Para SG personalizado: enviar id_sg (headnode construye el nombre SG_id{slice}_{id_sg})
+        # Para SG default: enviar sg_name = "default"
+        if request.id_sg is not None:
+            payload["id_sg"] = request.id_sg
+        else:
+            payload["sg_name"] = "default"
+        
+        # Usar plantilla o valores directos
+        if request.plantilla:
+            payload["rule_template"] = request.plantilla
+            if request.port_range:
+                payload["port_range"] = request.port_range
+        else:
+            payload["protocol"] = request.protocol
+            if request.port_range:
+                payload["port_range"] = request.port_range
+        
+        if request.description:
+            payload["description"] = request.description
+        
+        # Agregar en OpenStack
+        result = await call_security_api_openstack(
+            "/add-rule",
+            method="POST",
+            payload=payload
+        )
+        
+        if not result['success']:
+            return SecurityGroupResponse(
+                success=False,
+                message=result.get('message', 'Error agregando regla'),
+                zone=zona,
+                slice_id=request.slice_id,
+                error=result.get('error')
+            )
+        
+        data = result.get('data', {})
+        
+        if data.get('status') != 'success':
+            return SecurityGroupResponse(
+                success=False,
+                message=data.get('message', 'Error en OpenStack'),
+                zone=zona,
+                slice_id=request.slice_id,
+                error=data.get('message')
+            )
+        
+        # Sincronizar en BD
+        openstack_rule_uuid = data.get('rule_id')
+        
+        # Construir objeto de regla para BD
+        rule_data = {
+            "id": rule_id,  # add_rule_to_db espera campo 'id', no 'rule_id'
+            "direction": request.direction,
+            "protocol": request.protocol or "tcp",
+            "port_range": request.port_range or "any",
+            "remote_ip_prefix": request.remote_ip_prefix or "0.0.0.0/0",
+            "ether_type": request.ether_type or "IPv4",
+            "description": request.description or "",
+            "id_openstack": openstack_rule_uuid  # Campo para OpenStack UUID
+        }
+        
+        add_rule_to_db(request.slice_id, sg_name, rule_data)
+        
+        return SecurityGroupResponse(
+            success=True,
+            message=data.get('message', f'Regla {rule_id} agregada a {sg_name} (BD sincronizada)'),
+            zone=zona,
+            slice_id=request.slice_id,
+            id_sg=request.id_sg,
+            sg_id=data.get('sg_id')
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error en add-rule-openstack: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno: {str(e)}"
+        )
+
+@app.post("/security-groups-openstack/remove-rule", response_model=SecurityGroupResponse)
+async def remove_rule_from_sg_openstack(
+    request: RemoveRuleRequest,
+    authorized: bool = Depends(get_service_auth)
+):
+    """
+    Eliminar regla de security group en OpenStack
+    
+    Para OpenStack, el rule_id es el UUID de OpenStack, no el ID secuencial.
+    La BD almacena el mapeo entre ID secuencial y UUID.
+    """
+    try:
+        zona = request.zona_despliegue.lower()
+        
+        logger.info(f"Eliminando regla {request.rule_id} del slice {request.slice_id} en OpenStack")
+        
+        if zona != 'openstack':
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Zona '{zona}' no válida para endpoint OpenStack"
+            )
+        
+        # Determinar nombre del SG
+        if request.id_sg is not None:
+            sg_name = f"SG_{request.id_sg}"
+        else:
+            sg_name = None  # None = default SG
+        
+        # Obtener el UUID de OpenStack desde la BD
+        openstack_uuid = get_openstack_rule_uuid(request.slice_id, sg_name, request.rule_id)
+        
+        if not openstack_uuid:
+            return SecurityGroupResponse(
+                success=False,
+                message=f'Regla {request.rule_id} no encontrada en BD',
+                zone=zona,
+                slice_id=request.slice_id,
+                error='Rule not found in database'
+            )
+        
+        # Eliminar en OpenStack usando el UUID
+        result = await call_security_api_openstack(
+            "/remove-rule",
+            method="POST",
+            payload={
+                "slice_id": request.slice_id,
+                "rule_id": openstack_uuid
+            }
+        )
+        
+        if not result['success']:
+            return SecurityGroupResponse(
+                success=False,
+                message=result.get('message', 'Error eliminando regla'),
+                zone=zona,
+                slice_id=request.slice_id,
+                error=result.get('error')
+            )
+        
+        data = result.get('data', {})
+        
+        if data.get('status') != 'success':
+            return SecurityGroupResponse(
+                success=False,
+                message=data.get('message', 'Error en OpenStack'),
+                zone=zona,
+                slice_id=request.slice_id,
+                error=data.get('message')
+            )
+        
+        # Sincronizar en BD
+        remove_rule_from_db(request.slice_id, sg_name, request.rule_id)
+        
+        return SecurityGroupResponse(
+            success=True,
+            message=data.get('message', f'Regla {request.rule_id} eliminada de {sg_name or "default"} (BD actualizada)'),
+            zone=zona,
+            slice_id=request.slice_id
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error en remove-rule-openstack: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno: {str(e)}"
+        )
+
+@app.post("/security-groups-openstack/remove-custom", response_model=SecurityGroupResponse)
+async def remove_custom_sg_openstack(
+    request: RemoveCustomSGRequest,
+    authorized: bool = Depends(get_service_auth)
+):
+    """
+    Eliminar security group personalizado de OpenStack
+    """
+    try:
+        zona = request.zona_despliegue.lower()
+        
+        logger.info(f"Eliminando Security Group custom {request.id_sg} del slice {request.slice_id} en OpenStack")
+        
+        if zona != 'openstack':
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Zona '{zona}' no válida para endpoint OpenStack"
+            )
+        
+        result = await call_security_api_openstack(
+            "/remove-custom",
+            method="POST",
+            payload={
+                "slice_id": request.slice_id,
+                "id_sg": request.id_sg
+            }
+        )
+        
+        if not result['success']:
+            return SecurityGroupResponse(
+                success=False,
+                message=result.get('message', 'Error eliminando security group'),
+                zone=zona,
+                slice_id=request.slice_id,
+                error=result.get('error')
+            )
+        
+        data = result.get('data', {})
+        
+        if data.get('status') != 'success':
+            return SecurityGroupResponse(
+                success=False,
+                message=data.get('message', 'Error en OpenStack'),
+                zone=zona,
+                slice_id=request.slice_id,
+                error=data.get('message')
+            )
+        
+        # Sincronizar en BD
+        delete_sg_from_db(request.slice_id, request.id_sg)
+        
+        return SecurityGroupResponse(
+            success=True,
+            message=data.get('message', f'Security Group {request.id_sg} eliminado (BD actualizada)'),
+            zone=zona,
+            slice_id=request.slice_id,
+            id_sg=request.id_sg
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error en remove-custom-sg-openstack: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno: {str(e)}"
+        )
+
+@app.post("/security-groups-openstack/remove-default", response_model=SecurityGroupResponse)
+async def remove_default_sg_openstack(
+    request: RemoveDefaultSGRequest,
+    authorized: bool = Depends(get_service_auth)
+):
+    """
+    Eliminar security group default de OpenStack de un slice
+    
+    ⚠️ ADVERTENCIA: Esto deja las VMs sin protección de firewall.
+    Solo recomendado antes de eliminar el slice completo.
+    """
+    try:
+        zona = request.zona_despliegue.lower()
+        
+        logger.warning(f"Eliminando Security Group DEFAULT del slice {request.slice_id} en OpenStack")
+        
+        if zona != 'openstack':
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Zona '{zona}' no válida para endpoint OpenStack"
+            )
+        
+        result = await call_security_api_openstack(
+            "/remove-default",
+            method="POST",
+            payload={
+                "slice_id": request.slice_id,
+                "sg_name": "default"
+            }
+        )
+        
+        if not result['success']:
+            return SecurityGroupResponse(
+                success=False,
+                message=result.get('message', 'Error eliminando security group default'),
+                zone=zona,
+                slice_id=request.slice_id,
+                error=result.get('error')
+            )
+        
+        data = result.get('data', {})
+        
+        if data.get('status') != 'success':
+            return SecurityGroupResponse(
+                success=False,
+                message=data.get('message', 'Error en OpenStack'),
+                zone=zona,
+                slice_id=request.slice_id,
+                error=data.get('message')
+            )
+        
+        # Sincronizar en BD
+        delete_default_sg_from_db(request.slice_id)
+        
+        return SecurityGroupResponse(
+            success=True,
+            message=data.get('message', 'Security Group default eliminado (BD actualizada)'),
+            zone=zona,
+            slice_id=request.slice_id
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error en remove-default-sg-openstack: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno: {str(e)}"
+        )
+
+# ==================== ENDPOINT DE LIMPIEZA ====================
+
+@app.delete("/security-groups-{zona}/slice/{slice_id}")
+async def delete_all_security_groups_of_slice(
+    zona: str,
+    slice_id: int,
+    authorized: bool = Depends(get_service_auth)
+):
+    """
+    Eliminar TODOS los security groups de un slice (default + custom)
+    Usado para limpieza completa al eliminar un slice
+    """
+    try:
+        if zona not in ['linux', 'openstack']:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Zona inválida: {zona}"
+            )
+        
+        logger.info(f"Eliminando todos los security groups del slice {slice_id} en zona {zona}")
+        
+        # Conectar a BD
+        connection = mysql.connector.connect(**SG_DB_CONFIG)
+        cursor = connection.cursor(dictionary=True)
+        
+        # Obtener todos los security groups del slice
+        cursor.execute(
+            "SELECT id, name, is_default FROM security_groups WHERE slice_id = %s",
+            (slice_id,)
+        )
+        security_groups = cursor.fetchall()
+        
+        if not security_groups:
+            cursor.close()
+            connection.close()
+            return {
+                "success": True,
+                "message": f"No hay security groups para el slice {slice_id}",
+                "deleted_count": 0
+            }
+        
+        deleted_count = 0
+        errors = []
+        
+        # Eliminar cada security group
+        for sg in security_groups:
+            sg_name = sg['name']
+            is_default = sg['is_default']
+            
+            try:
+                # Llamar al orquestador para eliminar
+                if zona == 'linux':
+                    # Para Linux: llamar a remove-custom o remove-default
+                    endpoint = "/remove-default" if is_default else "/remove-custom"
+                    response = call_security_api(endpoint, {"slice_id": slice_id, "nombre": sg_name})
+                else:
+                    # Para OpenStack: llamar a remove-custom o remove-default
+                    endpoint = "/remove-default" if is_default else "/remove-custom"
+                    response = call_security_api_openstack(endpoint, {"slice_id": slice_id, "nombre": sg_name})
+                
+                if response.get('status_code') != 200:
+                    errors.append(f"Error eliminando {sg_name}: {response.get('error')}")
+                    continue
+                
+                deleted_count += 1
+                
+            except Exception as e:
+                errors.append(f"Error eliminando {sg_name}: {str(e)}")
+        
+        # Eliminar de BD
+        cursor.execute("DELETE FROM security_groups WHERE slice_id = %s AND zona = %s", (slice_id, zona))
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        logger.info(f"Security groups eliminados: {deleted_count}/{len(security_groups)}")
+        
+        return {
+            "success": True,
+            "message": f"Security groups eliminados: {deleted_count}/{len(security_groups)}",
+            "deleted_count": deleted_count,
+            "total": len(security_groups),
+            "errors": errors if errors else None
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error eliminando security groups del slice: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error interno: {str(e)}"
